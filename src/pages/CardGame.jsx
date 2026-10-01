@@ -1654,7 +1654,7 @@ const CardGame = () => {
             <h3><FaInfoCircle /> Battle Rules & Controls</h3>
             <ul>
               <li><strong>Randomized Hero Pictures:</strong> Every match generates fresh random hero portraits selected directly from your site work gallery!</li>
-              <li><strong>Hearthstone Heroes:</strong> Authentic ornate hero portraits with Hero Power abilities & crystal mana!</li>
+              <li><strong>Random Heroes:</strong> Authentic ornate hero portraits with Hero Power abilities & crystal mana!</li>
               <li><strong>Tap or Drag to Attack:</strong> On a phone, tap a ready unit on your board then tap an enemy unit or Hero to strike. On desktop you can also drag it onto the target!</li>
               <li><strong>Tap or Drag to Play:</strong> Tap a card in your hand to summon/cast it, or drag it onto the battlefield with a mouse!</li>
               <li><strong>AI Difficulty:</strong> Single Player offers Easy, Medium and Hard Sentinels — Easy holds back attacks, Hard spends every crystal, trades smartly and uses its Hero Power.</li>
