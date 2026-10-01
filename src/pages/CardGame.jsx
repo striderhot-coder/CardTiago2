@@ -32,7 +32,8 @@ import {
   FaCrosshairs,
   FaRandom,
   FaMusic,
-  FaSignOutAlt
+  FaSignOutAlt,
+  FaStar
 } from 'react-icons/fa'
 
 // Deck = the hand-authored Converging Reality cards plus every artwork in the
@@ -43,6 +44,43 @@ const CARD_POOL = [...cardsData, ...galleryCards]
 // which surfaced as duplicate React keys once the pool grew past 90 cards).
 let cardUid = 0
 const nextCardUid = () => `c${++cardUid}`
+
+// Single-player AI presets. Easy only swings with units it already had and
+// sometimes skips its deploy; Hard curves out all of its mana, picks favourable
+// trades and finishes with its Hero Power.
+const DIFFICULTIES = {
+  easy: {
+    label: 'Easy',
+    title: 'Rookie Sentinel',
+    icon: FaStar,
+    desc: 'Deploys slowly, attacks with part of its board',
+    deployChance: 0.6,
+    attackRatio: 0.5,
+    summoningSickness: true,
+    heroPower: false
+  },
+  medium: {
+    label: 'Medium',
+    title: 'Veteran Sentinel',
+    icon: FaRobot,
+    desc: 'Deploys every turn and swings with everything',
+    deployChance: 1,
+    attackRatio: 1,
+    summoningSickness: false,
+    heroPower: false
+  },
+  hard: {
+    label: 'Hard',
+    title: 'Overlord Sentinel',
+    icon: FaSkull,
+    desc: 'Spends all mana, trades smartly, goes for lethal',
+    deployChance: 1,
+    attackRatio: 1,
+    summoningSickness: false,
+    heroPower: true,
+    maxDeploys: 3
+  }
+}
 
 // Verified artwork images from your site portfolio (public folder & Surreal gallery)
 const heroImagePool = [
@@ -375,6 +413,9 @@ const CardGame = () => {
   
   // Play Mode: 'single' (vs AI) | 'local_2p' (Pass & Play) | 'online_2p' (P2P Tab Sync)
   const [playMode, setPlayMode] = useState('single')
+
+  // AI difficulty for Single Player: 'easy' | 'medium' | 'hard'
+  const [difficulty, setDifficulty] = useState('medium')
   
   // Multiplayer Role: 'p1' | 'p2'
   const [myRole, setMyRole] = useState('p1')
@@ -437,6 +478,13 @@ const CardGame = () => {
   // Live mirror so the AI can read its own board without side effects in an updater
   const p2BoardRef = useRef([])
   useEffect(() => { p2BoardRef.current = p2Board }, [p2Board])
+
+  // The AI sequences several attacks per turn, so it also needs live views of
+  // the player's board and HP (state values would be stale between timeouts).
+  const p1BoardRef = useRef([])
+  useEffect(() => { p1BoardRef.current = p1Board }, [p1Board])
+  const p1HpRef = useRef(30)
+  useEffect(() => { p1HpRef.current = p1Hp }, [p1Hp])
   
   // Combat selection (click fallback & drag)
   const [selectedAttacker, setSelectedAttacker] = useState(null)
@@ -1320,89 +1368,156 @@ const CardGame = () => {
   useEffect(() => {
     if (playMode !== 'single' || turn !== 'p2' || gameMode !== 'playing') return
 
+    const cfg = DIFFICULTIES[difficulty] || DIFFICULTIES.medium
     const timers = []
-    const after = (fn, ms) => { timers.push(setTimeout(fn, ms)); return timers[timers.length - 1] }
+    const after = (fn, ms) => { timers.push(setTimeout(fn, ms)) }
+
+    const damagePlayerHero = (amount, sourceName) => {
+      const nextHp = Math.max(0, p1HpRef.current - amount)
+      p1HpRef.current = nextHp
+      setP1Hp(nextHp)
+      triggerFloatingDmg('hero-p1', `-${amount}`, 'dmg')
+      playSFX('hit', sfxEnabled)
+      triggerScreenShake()
+      addLog(`💥 ${sourceName} hit your Hero for ${amount} damage!`)
+      if (nextHp === 0) {
+        setGameMode('defeat')
+        setWinner('p2')
+        playSFX('defeat', sfxEnabled)
+        addLog('💀 DEFEAT! Your Hero has fallen.')
+      }
+    }
+
+    const deploy = (card) => {
+      const unit = {
+        instanceId: `ai-unit-${nextCardUid()}`,
+        card,
+        currentHp: card.health,
+        maxHp: card.health,
+        attack: card.attack,
+        hasTaunt: card.rarity === 'Legendary' || card.rarity === 'Epic' || /taunt/i.test(card.ability || ''),
+        readyToAttack: false,
+        isJustSummoned: true
+      }
+      setP2Board(prev => [...prev, unit])
+      playSFX('cardPlay', sfxEnabled)
+      addLog(`🤖 ${p2HeroName} deployed ${card.name} (${card.attack}/${card.health})!`)
+    }
+
+    // Units already on board when the turn started — Easy only swings with these.
+    const veterans = p2BoardRef.current.map(u => u.instanceId)
 
     after(() => {
       const nextP2Max = Math.min(10, p2MaxMana + 1)
       setP2MaxMana(nextP2Max)
       setP2Mana(nextP2Max)
-      addLog(`🤖 Enemy Turn ${turnCount + 1}: Refilled Mana (${nextP2Max}/${nextP2Max}).`)
+      addLog(`🤖 ${cfg.title} — Turn ${turnCount + 1}: Refilled Mana (${nextP2Max}/${nextP2Max}).`)
 
-      // AI plays card if possible
-      const availableCards = CARD_POOL.filter(c => c.cost <= nextP2Max && c.type !== 'Spell')
-      if (availableCards.length > 0) {
-        const chosenCard = availableCards[Math.floor(Math.random() * availableCards.length)]
-        const aiUnit = {
-          instanceId: `ai-unit-${nextCardUid()}`,
-          card: chosenCard,
-          currentHp: chosenCard.health,
-          maxHp: chosenCard.health,
-          attack: chosenCard.attack,
-          hasTaunt: chosenCard.rarity === 'Legendary' || chosenCard.rarity === 'Epic',
-          readyToAttack: false,
-          isJustSummoned: true
+      // ---- Deployment plan ----
+      const plan = []
+      if (Math.random() < cfg.deployChance) {
+        const affordable = CARD_POOL.filter(c => c.cost <= nextP2Max && c.type !== 'Spell')
+        if (cfg.maxDeploys) {
+          // Hard curves out: biggest affordable card first, keeping 2 mana aside
+          // for its Hero Power once it has 4 or more.
+          let manaLeft = nextP2Max >= 4 ? nextP2Max - 2 : nextP2Max
+          for (let i = 0; i < cfg.maxDeploys && manaLeft > 0; i++) {
+            const opts = affordable.filter(c => c.cost <= manaLeft)
+            if (!opts.length) break
+            const best = opts.reduce((a, b) => (b.cost > a.cost ? b : a))
+            plan.push(best)
+            manaLeft -= best.cost
+          }
+        } else if (affordable.length) {
+          // Easy sticks to cheap cards, Medium picks freely
+          const cheap = affordable.filter(c => c.cost <= Math.max(1, Math.ceil(nextP2Max / 2)))
+          const pool = difficulty === 'easy' && cheap.length ? cheap : affordable
+          plan.push(pool[Math.floor(Math.random() * pool.length)])
         }
-        setP2Board(prev => [...prev, aiUnit])
-        playSFX('cardPlay', sfxEnabled)
-        addLog(`🤖 ${p2HeroName} deployed ${chosenCard.name} (${chosenCard.attack}/${chosenCard.health})!`)
       }
 
-      // AI Attacks with Lunge SFX (board read from a ref, never from inside an updater)
+      const spent = plan.reduce((sum, c) => sum + c.cost, 0)
+      plan.forEach((card, i) => after(() => deploy(card), 380 * i))
+
+      // ---- Attack phase ----
       after(() => {
-        p2BoardRef.current.filter(u => u.attack > 0).forEach(aiUnit => {
-          setAttackingId(aiUnit.instanceId)
-          playSFX('attack', sfxEnabled)
+        let attackers = p2BoardRef.current.filter(u => u.attack > 0 && u.currentHp > 0)
+        if (cfg.summoningSickness) attackers = attackers.filter(u => veterans.includes(u.instanceId))
+        if (cfg.attackRatio < 1 && attackers.length > 1) {
+          attackers = attackers.slice(0, Math.max(1, Math.round(attackers.length * cfg.attackRatio)))
+        }
 
+        const totalAttack = attackers.reduce((sum, u) => sum + u.attack, 0)
+        const goFace = !!cfg.heroPower && totalAttack >= p1HpRef.current
+        let liveBoard = [...p1BoardRef.current]
+
+        attackers.forEach((aiUnit, i) => {
           after(() => {
-            playSFX('hit', sfxEnabled)
-            triggerScreenShake()
+            if (p1HpRef.current <= 0) return
+            setAttackingId(aiUnit.instanceId)
+            playSFX('attack', sfxEnabled)
 
-            setP1Board(pBoard => {
-              const tauntUnits = pBoard.filter(u => u.hasTaunt && u.currentHp > 0)
-              if (tauntUnits.length > 0) {
-                const target = tauntUnits[0]
+            after(() => {
+              setAttackingId(null)
+              if (p1HpRef.current <= 0) return
+
+              const taunts = liveBoard.filter(u => u.hasTaunt && u.currentHp > 0)
+              let target = null
+              if (taunts.length) {
+                // Hard kills the cheapest taunt it can, otherwise chips the weakest
+                target = cfg.heroPower
+                  ? (taunts.find(u => u.currentHp <= aiUnit.attack) || taunts.reduce((a, b) => (a.currentHp <= b.currentHp ? a : b)))
+                  : taunts[0]
+              } else if (cfg.heroPower && !goFace) {
+                const trades = liveBoard.filter(u => u.currentHp > 0 && u.currentHp <= aiUnit.attack && u.attack < aiUnit.currentHp)
+                if (trades.length) target = trades.sort((a, b) => (b.attack + b.currentHp) - (a.attack + a.currentHp))[0]
+              }
+
+              if (target) {
+                playSFX('hit', sfxEnabled)
+                triggerScreenShake()
                 triggerFloatingDmg(target.instanceId, `-${aiUnit.attack}`, 'dmg')
                 addLog(`🚨 AI ${aiUnit.card.name} attacked your ${target.card.name} for ${aiUnit.attack} damage!`)
-                return pBoard.map(u => u.instanceId === target.instanceId ? { ...u, currentHp: u.currentHp - aiUnit.attack } : u).filter(u => u.currentHp > 0)
+                liveBoard = liveBoard
+                  .map(u => (u.instanceId === target.instanceId ? { ...u, currentHp: u.currentHp - aiUnit.attack } : u))
+                  .filter(u => u.currentHp > 0)
+                setP1Board(liveBoard)
               } else {
-                triggerFloatingDmg('hero-p1', `-${aiUnit.attack}`, 'dmg')
-                setP1Hp(pHp => {
-                  const nextHp = Math.max(0, pHp - aiUnit.attack)
-                  if (nextHp === 0) {
-                    setGameMode('defeat')
-                    setWinner('p2')
-                    playSFX('defeat', sfxEnabled)
-                    addLog('💀 DEFEAT! Your Hero has fallen.')
-                  }
-                  return nextHp
-                })
-                addLog(`💥 AI ${aiUnit.card.name} attacked your Hero for ${aiUnit.attack} damage!`)
-                return pBoard
+                damagePlayerHero(aiUnit.attack, `AI ${aiUnit.card.name}`)
               }
-            })
-
-            setAttackingId(null)
-          }, 250)
+            }, 250)
+          }, 400 * i)
         })
 
-        // Return turn to P1
+        // ---- Hero Power (Hard) then hand the turn back ----
         after(() => {
-          const nextP1Max = Math.min(10, p1MaxMana + 1)
-          setP1MaxMana(nextP1Max)
-          setP1Mana(nextP1Max)
-          setTurnCount(c => c + 1)
-          setP1Board(board => board.map(u => ({ ...u, readyToAttack: true })))
-          drawCard('p1', 1)
-          setTurn('p1')
-          triggerTurnBanner('YOUR TURN', 'p1')
-          addLog(`⚡ Your turn begins! Mana refilled (${nextP1Max}/${nextP1Max}).`)
-        }, 800)
-      }, 1000)
-    }, 1000)
+          if (p1HpRef.current <= 0) return
+          const manaLeft = Math.max(0, nextP2Max - spent)
+          if (cfg.heroPower && manaLeft >= 2) {
+            setP2Mana(manaLeft - 2)
+            playSFX('spell', sfxEnabled)
+            addLog(`🔮 ${p2HeroName} used their Hero Power!`)
+            damagePlayerHero(2, `${p2HeroName}'s Hero Power`)
+          }
+
+          after(() => {
+            if (p1HpRef.current <= 0) return
+            const nextP1Max = Math.min(10, p1MaxMana + 1)
+            setP1MaxMana(nextP1Max)
+            setP1Mana(nextP1Max)
+            setTurnCount(c => c + 1)
+            setP1Board(board => board.map(u => ({ ...u, readyToAttack: true })))
+            drawCard('p1', 1)
+            setTurn('p1')
+            triggerTurnBanner('YOUR TURN', 'p1')
+            addLog(`⚡ Your turn begins! Mana refilled (${nextP1Max}/${nextP1Max}).`)
+          }, 900)
+        }, 400 * attackers.length + 500)
+      }, 380 * plan.length + 700)
+    }, 900)
 
     return () => timers.forEach(clearTimeout)
-  }, [turn, gameMode, playMode])
+  }, [turn, gameMode, playMode, difficulty])
 
   // Derive perspective views
   const isMeP1 = playMode === 'online_2p' ? myRole === 'p1' : (playMode === 'local_2p' ? turn === 'p1' : true)
@@ -1484,6 +1599,29 @@ const CardGame = () => {
             </div>
           </div>
 
+          {/* AI DIFFICULTY SELECTOR */}
+          {playMode === 'single' && (
+            <div className="mode-selection-container difficulty-selection-container">
+              <h3>Choose AI Difficulty</h3>
+              <div className="mode-selector-grid difficulty-grid">
+                {Object.entries(DIFFICULTIES).map(([key, cfg]) => {
+                  const Icon = cfg.icon
+                  return (
+                    <button
+                      key={key}
+                      className={`mode-btn difficulty-btn ${key} ${difficulty === key ? 'active' : ''}`}
+                      onClick={() => setDifficulty(key)}
+                    >
+                      <Icon className="mode-icon" />
+                      <span className="mode-title">{cfg.label}</span>
+                      <span className="mode-desc">{cfg.desc}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ONLINE ROOM CONFIGURATION */}
           {playMode === 'online_2p' && (
             <div className="room-config-box">
@@ -1519,6 +1657,7 @@ const CardGame = () => {
               <li><strong>Hearthstone Heroes:</strong> Authentic ornate hero portraits with Hero Power abilities & crystal mana!</li>
               <li><strong>Tap or Drag to Attack:</strong> On a phone, tap a ready unit on your board then tap an enemy unit or Hero to strike. On desktop you can also drag it onto the target!</li>
               <li><strong>Tap or Drag to Play:</strong> Tap a card in your hand to summon/cast it, or drag it onto the battlefield with a mouse!</li>
+              <li><strong>AI Difficulty:</strong> Single Player offers Easy, Medium and Hard Sentinels — Easy holds back attacks, Hard spends every crystal, trades smartly and uses its Hero Power.</li>
               <li><strong>Portfolio Deck:</strong> Every artwork from the Work, More Work and Surreal galleries is a playable card — {CARD_POOL.length} unique cards in each deck!</li>
             </ul>
           </div>
@@ -1645,6 +1784,12 @@ const CardGame = () => {
               <button className="toggle-sfx-btn" onClick={() => setSfxEnabled(!sfxEnabled)} title="Toggle Sound Effects">
                 {sfxEnabled ? <FaVolumeUp /> : <FaVolumeMute />} {sfxEnabled ? 'SFX ON' : 'SFX OFF'}
               </button>
+
+              {playMode === 'single' && (
+                <span className={`difficulty-badge ${difficulty}`} title={`AI difficulty: ${DIFFICULTIES[difficulty].title}`}>
+                  AI · {DIFFICULTIES[difficulty].label}
+                </span>
+              )}
 
               {playMode === 'local_2p' && (
                 <button className="toggle-hand-btn" onClick={() => setHideHand(!hideHand)}>

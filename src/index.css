@@ -3235,6 +3235,57 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
 }
 
+/* AI difficulty picker reuses the mode card layout with a per-tier accent */
+.difficulty-selection-container {
+  margin-top: 1.5rem;
+}
+
+.difficulty-btn .mode-desc {
+  text-align: center;
+}
+
+.difficulty-btn.easy .mode-icon { color: #10b981; }
+
+.difficulty-btn.active.easy {
+  border-color: #10b981;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22), rgba(6, 182, 212, 0.1));
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+}
+
+.difficulty-btn.hard .mode-icon { color: #ef4444; }
+
+.difficulty-btn.active.hard {
+  border-color: #ef4444;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.22), rgba(168, 85, 247, 0.14));
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.35);
+}
+
+/* In-match reminder of which Sentinel you are fighting */
+.difficulty-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid rgba(6, 182, 212, 0.45);
+  background: rgba(6, 182, 212, 0.14);
+  color: var(--accent-cyan);
+}
+
+.difficulty-badge.easy {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.14);
+  color: #6ee7b7;
+}
+
+.difficulty-badge.hard {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
 .mode-icon {
   font-size: 2rem;
   color: var(--accent-cyan);
@@ -4501,6 +4552,13 @@ body {
     flex: 0 0 auto;
     flex-wrap: nowrap;
     gap: 0.3rem;
+  }
+
+  /* The top bar is icon-only on phones, so keep the tier chip tiny too */
+  body.arena-fullscreen .difficulty-badge {
+    font-size: 0.55rem;
+    padding: 0.15rem 0.35rem;
+    letter-spacing: 0.02em;
   }
 
   /* font-size:0 collapses the button label; the icon is restored below */
