@@ -1,3 +1,4 @@
+import { supabase, isSupabaseConfigured } from '../supabaseClient'
 import React, { useState, useEffect, useRef } from 'react'
 import { cardsData } from '../data/universeData'
 import { galleryCards } from '../data/galleryCards'
@@ -411,7 +412,7 @@ const CardGame = () => {
   // Game state mode: 'menu' | 'playing' | 'victory' | 'defeat'
   const [gameMode, setGameMode] = useState('menu')
   
-  // Play Mode: 'single' (vs AI) | 'local_2p' (Pass & Play) | 'online_2p' (P2P Tab Sync)
+  // Play Mode: 'single' (vs AI) | 'local_2p' (Pass & Play) | 'online_2p' (realtime 2 devices)
   const [playMode, setPlayMode] = useState('single')
 
   // AI difficulty for Single Player: 'easy' | 'medium' | 'hard'
@@ -431,10 +432,13 @@ const CardGame = () => {
   const [p2HeroName, setP2HeroName] = useState('Nyx (Chrono Sentinel)')
 
   // Online Room State
-  const [roomCode, setRoomCode] = useState('7842')
+  const [roomCode, setRoomCode] = useState('')
   const [inputRoomCode, setInputRoomCode] = useState('')
   const [onlineStatus, setOnlineStatus] = useState('idle')
+  const [onlineError, setOnlineError] = useState('')
   const [peerConnected, setPeerConnected] = useState(false)
+  const [copiedCode, setCopiedCode] = useState(false)
+  const [syncNonce, setSyncNonce] = useState(0)
 
   // Pass & Play options
   const [hideHand, setHideHand] = useState(false)
@@ -522,8 +526,19 @@ const CardGame = () => {
     unitsDestroyed: 0
   })
 
-  // Channel ref for P2P Broadcast
+  // Channel ref for realtime multiplayer
   const channelRef = useRef(null)
+  const snapshotRef = useRef({})
+  const syncQueuedRef = useRef(false)
+  const applyingRemoteRef = useRef(false)
+  const playModeRef = useRef(playMode)
+  const myRoleRef = useRef(myRole)
+  const gameModeRef = useRef(gameMode)
+  const startedOnlineRef = useRef(false)
+
+  playModeRef.current = playMode
+  myRoleRef.current = myRole
+  gameModeRef.current = gameMode
 
   // Add message to battle log
   const addLog = (msg) => {
@@ -549,6 +564,7 @@ const CardGame = () => {
     setP1HeroName(name1)
     setP2HeroName(name2)
     addLog(`🎲 Heroes randomized! P1: ${name1}, P2: ${name2}`)
+    if (playModeRef.current === 'online_2p') queueSync()
   }
 
   // Trigger floating damage popup
@@ -583,35 +599,118 @@ const CardGame = () => {
     }))
   }
 
-  // Generate random 4-digit code
   const generateRoomCode = () => {
-    return Math.floor(1000 + Math.random() * 9000).toString()
+    return Math.floor(100000 + Math.random() * 900000).toString()
   }
 
-  // Broadcast state helper for online mode
+  const buildSnapshot = (extraPayload = {}) => ({
+    type: extraPayload.type || 'STATE_UPDATE',
+    p1Hp,
+    p2Hp,
+    p1Mana,
+    p1MaxMana,
+    p2Mana,
+    p2MaxMana,
+    p1Hand,
+    p2Hand,
+    p1Deck,
+    p2Deck,
+    p1Board,
+    p2Board,
+    p1HeroImg,
+    p2HeroImg,
+    p1HeroName,
+    p2HeroName,
+    turn,
+    turnCount,
+    logs,
+    winner,
+    gameMode,
+    ...extraPayload
+  })
+
+  snapshotRef.current = buildSnapshot()
+
+  const queueSync = () => {
+    if (playModeRef.current !== 'online_2p') return
+    syncQueuedRef.current = true
+    setSyncNonce((n) => n + 1)
+  }
+
   const broadcastState = (extraPayload = {}) => {
-    if (playMode !== 'online_2p' || !channelRef.current) return
-
-    const fullState = {
-      type: 'STATE_UPDATE',
-      p1Hp, p2Hp,
-      p1Mana, p1MaxMana,
-      p2Mana, p2MaxMana,
-      p1Hand, p2Hand,
-      p1Deck, p2Deck,
-      p1Board, p2Board,
-      p1HeroImg, p2HeroImg,
-      p1HeroName, p2HeroName,
-      turn, turnCount,
-      logs, winner, gameMode,
-      ...extraPayload
-    }
-
-    try {
-      channelRef.current.postMessage(fullState)
-      localStorage.setItem(`cg_room_${roomCode}`, JSON.stringify({ state: fullState, timestamp: Date.now() }))
-    } catch (e) {}
+    if (playModeRef.current !== 'online_2p' || !channelRef.current?.send) return
+    const payload = { ...snapshotRef.current, ...extraPayload }
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'game_state',
+      payload
+    }).catch((error) => {
+      console.error('Supabase broadcast error:', error)
+    })
   }
+
+  const applyRemoteState = (data) => {
+    if (!data) return
+    applyingRemoteRef.current = true
+    setPeerConnected(true)
+
+    if (data.p1Hp !== undefined) setP1Hp(data.p1Hp)
+    if (data.p2Hp !== undefined) setP2Hp(data.p2Hp)
+    if (data.p1Mana !== undefined) setP1Mana(data.p1Mana)
+    if (data.p1MaxMana !== undefined) setP1MaxMana(data.p1MaxMana)
+    if (data.p2Mana !== undefined) setP2Mana(data.p2Mana)
+    if (data.p2MaxMana !== undefined) setP2MaxMana(data.p2MaxMana)
+    if (data.p1Hand) setP1Hand(data.p1Hand)
+    if (data.p2Hand) setP2Hand(data.p2Hand)
+    if (data.p1Deck) commitDeck('p1', data.p1Deck)
+    if (data.p2Deck) commitDeck('p2', data.p2Deck)
+    if (data.p1Board) setP1Board(data.p1Board)
+    if (data.p2Board) setP2Board(data.p2Board)
+    if (data.p1HeroImg) setP1HeroImg(data.p1HeroImg)
+    if (data.p2HeroImg) setP2HeroImg(data.p2HeroImg)
+    if (data.p1HeroName) setP1HeroName(data.p1HeroName)
+    if (data.p2HeroName) setP2HeroName(data.p2HeroName)
+    if (data.turn) {
+      setTurn((prev) => {
+        if (prev !== data.turn) {
+          triggerTurnBanner(data.turn === 'p1' ? 'PLAYER 1 TURN' : 'PLAYER 2 TURN', data.turn)
+        }
+        return data.turn
+      })
+    }
+    if (data.turnCount !== undefined) setTurnCount(data.turnCount)
+    if (data.logs) setLogs(data.logs)
+    if (data.winner !== undefined) setWinner(data.winner)
+    if (data.gameMode) setGameMode(data.gameMode)
+  }
+
+  useEffect(() => {
+    const hash = window.location.hash || ''
+    const queryIndex = hash.indexOf('?')
+    if (queryIndex === -1) return
+    const room = new URLSearchParams(hash.slice(queryIndex)).get('room')
+    if (room) {
+      setPlayMode('online_2p')
+      setInputRoomCode(room.replace(/\D/g, '').slice(0, 6))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!syncQueuedRef.current) return
+    if (applyingRemoteRef.current) {
+      applyingRemoteRef.current = false
+      syncQueuedRef.current = false
+      return
+    }
+    if (playMode !== 'online_2p' || !channelRef.current?.send) return
+    syncQueuedRef.current = false
+    broadcastState()
+  }, [
+    playMode, p1Hp, p2Hp, p1Mana, p1MaxMana, p2Mana, p2MaxMana,
+    p1Hand, p2Hand, p1Deck, p2Deck, p1Board, p2Board,
+    p1HeroImg, p2HeroImg, p1HeroName, p2HeroName,
+    turn, turnCount, logs, winner, gameMode, syncNonce
+  ])
 
   // Chill Background Music Controller
   useEffect(() => {
@@ -632,84 +731,91 @@ const CardGame = () => {
     return () => document.body.classList.remove('arena-fullscreen')
   }, [gameMode])
 
-  // Listen for BroadcastChannel & localStorage sync
   useEffect(() => {
-    if (playMode !== 'online_2p' || !roomCode) return
+    if (playMode !== 'online_2p' || !roomCode || !myRole) return
+    if (!isSupabaseConfigured || !supabase) {
+      setOnlineError('Online play is missing Supabase keys. Add VITE_SUPABASE_URL and the publishable key to .env.')
+      setOnlineStatus('error')
+      return
+    }
 
     const channelName = `card_game_room_${roomCode}`
-    const bc = new BroadcastChannel(channelName)
-    channelRef.current = bc
+    const channel = supabase.channel(channelName, {
+      config: {
+        broadcast: { self: false },
+        presence: { key: myRole }
+      }
+    })
 
-    const handleMessage = (data) => {
-      if (!data) return
+    channelRef.current = channel
 
-      if (data.type === 'PEER_JOINED') {
+    const markOpponentPresent = () => {
+      const players = Object.values(channel.presenceState()).flat()
+      const hasOpponent = players.some((player) => player.role && player.role !== myRole)
+      if (hasOpponent) {
         setPeerConnected(true)
-        setOnlineStatus('connected')
-        addLog('🌐 Player 2 connected to the arena!')
-        if (myRole === 'p1') {
-          broadcastState({ type: 'GAME_START_SYNC' })
-        }
-      } else if (data.type === 'GAME_START_SYNC' || data.type === 'STATE_UPDATE') {
-        if (data.p1Hp !== undefined) setP1Hp(data.p1Hp)
-        if (data.p2Hp !== undefined) setP2Hp(data.p2Hp)
-        if (data.p1Mana !== undefined) setP1Mana(data.p1Mana)
-        if (data.p1MaxMana !== undefined) setP1MaxMana(data.p1MaxMana)
-        if (data.p2Mana !== undefined) setP2Mana(data.p2Mana)
-        if (data.p2MaxMana !== undefined) setP2MaxMana(data.p2MaxMana)
-        if (data.p1Hand) setP1Hand(data.p1Hand)
-        if (data.p2Hand) setP2Hand(data.p2Hand)
-        if (data.p1Deck) commitDeck('p1', data.p1Deck)
-        if (data.p2Deck) commitDeck('p2', data.p2Deck)
-        if (data.p1Board) setP1Board(data.p1Board)
-        if (data.p2Board) setP2Board(data.p2Board)
-        if (data.p1HeroImg) setP1HeroImg(data.p1HeroImg)
-        if (data.p2HeroImg) setP2HeroImg(data.p2HeroImg)
-        if (data.p1HeroName) setP1HeroName(data.p1HeroName)
-        if (data.p2HeroName) setP2HeroName(data.p2HeroName)
-        if (data.turn && data.turn !== turn) {
-          setTurn(data.turn)
-          triggerTurnBanner(data.turn === 'p1' ? 'PLAYER 1 TURN' : 'PLAYER 2 TURN', data.turn)
-        }
-        if (data.turnCount) setTurnCount(data.turnCount)
-        if (data.logs) setLogs(data.logs)
-        if (data.gameMode) setGameMode(data.gameMode)
-        if (data.winner !== undefined) setWinner(data.winner)
-        setPeerConnected(true)
-        setOnlineStatus('connected')
+        setOnlineError('')
+      } else {
+        setPeerConnected(false)
       }
     }
 
-    bc.onmessage = (e) => handleMessage(e.data)
-
-    const handleStorageChange = (e) => {
-      if (e.key === `cg_room_${roomCode}` && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue)
-          if (parsed && parsed.state) handleMessage(parsed.state)
-        } catch (err) {}
-      }
-    }
-
-    window.addEventListener('storage', handleStorageChange)
+    channel
+      .on('broadcast', { event: 'game_state' }, ({ payload }) => {
+        applyRemoteState(payload)
+      })
+      .on('broadcast', { event: 'peer_joined' }, ({ payload }) => {
+        if (payload?.role && payload.role !== myRole) {
+          setPeerConnected(true)
+          addLog('🌐 Opponent connected to the arena!')
+        }
+      })
+      .on('presence', { event: 'sync' }, markOpponentPresent)
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ role: myRole, joinedAt: Date.now() })
+          await channel.send({
+            type: 'broadcast',
+            event: 'peer_joined',
+            payload: { role: myRole }
+          })
+          if (myRole === 'p1' && gameModeRef.current === 'playing') {
+            queueSync()
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setOnlineStatus('error')
+          setOnlineError('Could not reach the realtime server. Check your connection and try again.')
+        }
+      })
 
     return () => {
-      bc.close()
-      window.removeEventListener('storage', handleStorageChange)
+      if (channelRef.current === channel) {
+        channelRef.current = null
+      }
+      supabase.removeChannel(channel)
     }
-  }, [playMode, roomCode, myRole, p1Hp, p2Hp, p1Mana, p1MaxMana, p2Mana, p2MaxMana, p1Hand, p2Hand, p1Deck, p2Deck, p1Board, p2Board, p1HeroImg, p2HeroImg, turn, turnCount, logs, winner, gameMode])
+  }, [playMode, roomCode, myRole])
+
+  useEffect(() => {
+    if (playMode !== 'online_2p' || myRole !== 'p1' || !peerConnected) return
+    if (gameMode !== 'menu' || startedOnlineRef.current) return
+    startedOnlineRef.current = true
+    handleStartGame('online_2p', 'p1')
+  }, [peerConnected, playMode, myRole, gameMode])
 
   // Global Pointer Move & Pointer Up Listener for Drag-and-Drop Targeting.
   // Pointer events cover mouse, touch and pen with one code path.
   useEffect(() => {
     const beginDrag = (pending, x, y) => {
-      const rect = pending.el.getBoundingClientRect()
+      const rect = pending.el?.getBoundingClientRect?.()
+      const startX = rect ? rect.left + rect.width / 2 : x
+      const startY = rect ? rect.top + rect.height / 2 : y
       setDragState({
         isDragging: true,
         type: pending.type,
         item: pending.item,
-        startX: rect.left + rect.width / 2,
-        startY: rect.top + rect.height / 2,
+        startX,
+        startY,
         currentX: x,
         currentY: y
       })
@@ -891,59 +997,76 @@ const CardGame = () => {
     setWinner(null)
     setStats({ damageDealt: 0, cardsPlayed: 0, unitsDestroyed: 0 })
 
-    const modeName = overrideMode === 'single' ? 'Single Player vs AI' : overrideMode === 'local_2p' ? 'Local 2-Player (Pass & Play)' : 'Online Multi-Tab Arena'
+    const modeName = overrideMode === 'single' ? 'Single Player vs AI' : overrideMode === 'local_2p' ? 'Local 2-Player (Pass & Play)' : 'Online 2-Player'
     const startMsg = `⚔️ Battle initiated in ${modeName}! Tap cards to play & tap units to attack (drag works on desktop)!`
     setLogs([startMsg])
 
     setGameMode('playing')
-    triggerTurnBanner('BATTLE START! YOUR TURN', 'p1')
+    triggerTurnBanner(overrideRole === 'p1' ? 'BATTLE START! YOUR TURN' : 'BATTLE START!', 'p1')
 
-    if (overrideMode === 'online_2p' && channelRef.current) {
-      setTimeout(() => {
-        broadcastState({
-          type: 'GAME_START_SYNC',
-          p1Hp: 30, p2Hp: 30,
-          p1Mana: 1, p1MaxMana: 1,
-          p2Mana: 1, p2MaxMana: 1,
-          p1Hand: hand1, p2Hand: hand2,
-          p1Deck: deck1Rem, p2Deck: deck2Rem,
-          p1Board: [], p2Board: [],
-          turn: 'p1', turnCount: 1,
-          logs: [startMsg], gameMode: 'playing', winner: null
-        })
-      }, 200)
+    if (overrideMode === 'online_2p') {
+      queueSync()
     }
   }
 
-  // Host Online Room
+  const handleCancelOnline = () => {
+    startedOnlineRef.current = false
+    setPeerConnected(false)
+    setOnlineStatus('idle')
+    setRoomCode('')
+    setOnlineError('')
+    setGameMode('menu')
+  }
+
+  const handleCopyRoomCode = async () => {
+    if (!roomCode) return
+    const shareUrl = `${window.location.origin}${window.location.pathname}#/game?room=${roomCode}`
+    try {
+      await navigator.clipboard.writeText(`${roomCode}\n${shareUrl}`)
+      setCopiedCode(true)
+      setTimeout(() => setCopiedCode(false), 1800)
+    } catch (err) {
+      setOnlineError('Could not copy. Select the code and copy it manually.')
+    }
+  }
+
   const handleHostRoom = () => {
+    if (!isSupabaseConfigured) {
+      setOnlineStatus('error')
+      setOnlineError('Online play is not configured. Add Supabase keys to .env and restart the dev server.')
+      return
+    }
     const code = generateRoomCode()
+    startedOnlineRef.current = false
+    setPeerConnected(false)
+    setOnlineError('')
     setRoomCode(code)
     setMyRole('p1')
     setPlayMode('online_2p')
     setOnlineStatus('hosting')
-    handleStartGame('online_2p', 'p1')
-    addLog(`🔑 Room ${code} created. Share code or open in a 2nd tab to play!`)
+    setGameMode('menu')
   }
 
-  // Join Online Room
   const handleJoinRoom = () => {
-    if (!inputRoomCode.trim()) return
-    const code = inputRoomCode.trim()
+    const code = (inputRoomCode || '').replace(/\D/g, '').slice(0, 6)
+    if (code.length < 6) {
+      setOnlineStatus('error')
+      setOnlineError('Enter the 6-digit room code from the host.')
+      return
+    }
+    if (!isSupabaseConfigured) {
+      setOnlineStatus('error')
+      setOnlineError('Online play is not configured. Add Supabase keys to .env and restart the dev server.')
+      return
+    }
+    startedOnlineRef.current = false
+    setPeerConnected(false)
+    setOnlineError('')
     setRoomCode(code)
     setMyRole('p2')
     setPlayMode('online_2p')
-    setOnlineStatus('joined')
-    setGameMode('playing')
-
-    setTimeout(() => {
-      if (channelRef.current) {
-        channelRef.current.postMessage({ type: 'PEER_JOINED' })
-        try {
-          localStorage.setItem(`cg_room_${code}`, JSON.stringify({ state: { type: 'PEER_JOINED' }, timestamp: Date.now() }))
-        } catch (e) {}
-      }
-    }, 300)
+    setOnlineStatus('joining')
+    setGameMode('menu')
   }
 
   // Draw card for player
@@ -1023,7 +1146,7 @@ const CardGame = () => {
     addLog(`⚡ ${isP1 ? p1HeroName : p2HeroName} used Hero Power for ${dmg} direct damage!`)
 
     if (playMode === 'online_2p') {
-      setTimeout(() => broadcastState(), 100)
+      queueSync()
     }
   }
 
@@ -1150,7 +1273,7 @@ const CardGame = () => {
     }
 
     if (playMode === 'online_2p') {
-      setTimeout(() => broadcastState(), 100)
+      queueSync()
     }
   }
 
@@ -1252,7 +1375,7 @@ const CardGame = () => {
         setSelectedAttacker(null)
 
         if (playMode === 'online_2p') {
-          setTimeout(() => broadcastState(), 100)
+          queueSync()
         }
       }, 350)
     }, 250)
@@ -1321,7 +1444,7 @@ const CardGame = () => {
       setSelectedAttacker(null)
 
       if (playMode === 'online_2p') {
-        setTimeout(() => broadcastState(), 100)
+        queueSync()
       }
     }, 250)
   }
@@ -1360,7 +1483,7 @@ const CardGame = () => {
     }
 
     if (playMode === 'online_2p') {
-      setTimeout(() => broadcastState({ turn: nextTurn }), 100)
+      queueSync()
     }
   }
 
@@ -1593,8 +1716,8 @@ const CardGame = () => {
                 onClick={() => setPlayMode('online_2p')}
               >
                 <FaGlobe className="mode-icon" />
-                <span className="mode-title">Multi-Tab Online</span>
-                <span className="mode-desc">Room Code P2P Sync</span>
+                <span className="mode-title">Online 2-Player</span>
+                <span className="mode-desc">Two devices, one room code</span>
               </button>
             </div>
           </div>
@@ -1625,28 +1748,82 @@ const CardGame = () => {
           {/* ONLINE ROOM CONFIGURATION */}
           {playMode === 'online_2p' && (
             <div className="room-config-box">
-              <h3><FaWifi /> Multi-Tab / P2P Room Connection</h3>
-              <p className="room-subtext">Host a game or enter a 4-digit code to join a game running in another tab or browser!</p>
+              <h3><FaWifi /> Online match</h3>
+              <p className="room-subtext">
+                Host creates a room, then the other player joins from any phone or computer using the code.
+                You do not need to be on the same Wi‑Fi.
+              </p>
 
-              <div className="room-actions">
-                <button className="host-room-btn" onClick={handleHostRoom}>
-                  <FaUsers /> Host New Game (Player 1)
-                </button>
+              {onlineStatus === 'hosting' && (
+                <div className="room-lobby" role="status" aria-live="polite">
+                  <p className="room-lobby-label">Share this room code</p>
+                  <div className="room-code-display">{roomCode}</div>
+                  <p className="room-subtext">
+                    {peerConnected
+                      ? 'Opponent found — starting the match…'
+                      : 'Waiting for Player 2 to join…'}
+                  </p>
+                  <div className="room-actions">
+                    <button type="button" className="join-room-btn" onClick={handleCopyRoomCode}>
+                      <FaCopy /> {copiedCode ? 'Copied' : 'Copy code & link'}
+                    </button>
+                    <button type="button" className="host-room-btn" onClick={handleCancelOnline}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
-                <div className="join-room-group">
-                  <input 
-                    type="text" 
-                    placeholder="Enter Room Code (e.g. 7842)"
-                    value={inputRoomCode}
-                    maxLength={6}
-                    onChange={(e) => setInputRoomCode(e.target.value)}
-                    className="room-code-input"
-                  />
-                  <button className="join-room-btn" onClick={handleJoinRoom}>
-                    Join Game (Player 2)
+              {onlineStatus === 'joining' && (
+                <div className="room-lobby" role="status" aria-live="polite">
+                  <p className="room-lobby-label">Joining room {roomCode}</p>
+                  <p className="room-subtext">
+                    {peerConnected
+                      ? 'Connected. Waiting for the host to start…'
+                      : 'Looking for the host…'}
+                  </p>
+                  <button type="button" className="host-room-btn" onClick={handleCancelOnline}>
+                    Leave lobby
                   </button>
                 </div>
-              </div>
+              )}
+
+              {(onlineStatus === 'idle' || onlineStatus === 'error') && (
+                <div className="room-actions">
+                  <button type="button" className="host-room-btn" onClick={handleHostRoom}>
+                    <FaUsers /> Host New Game (Player 1)
+                  </button>
+
+                  <form
+                    className="join-room-group"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      handleJoinRoom()
+                    }}
+                  >
+                    <label className="sr-only" htmlFor="room-code-input">Room code</label>
+                    <input
+                      id="room-code-input"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="6-digit room code"
+                      value={inputRoomCode}
+                      maxLength={6}
+                      onChange={(e) => setInputRoomCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="room-code-input"
+                      aria-invalid={onlineStatus === 'error'}
+                    />
+                    <button type="submit" className="join-room-btn">
+                      Join Game (Player 2)
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {onlineError && (
+                <p className="room-error" role="alert">{onlineError}</p>
+              )}
             </div>
           )}
 
@@ -1762,8 +1939,13 @@ const CardGame = () => {
               {playMode === 'local_2p' && <span><FaUserFriends /> Mode: Local 2-Player (Pass & Play)</span>}
               {playMode === 'online_2p' && (
                 <span className="online-badge">
-                  <FaGlobe /> Room Code: <strong>{roomCode}</strong> ({myRole === 'p1' ? 'Host / Player 1' : 'Guest / Player 2'})
-                  {peerConnected ? <span className="status-pill connected">🟢 Connected</span> : <span className="status-pill waiting">🟡 Waiting for tab 2...</span>}
+                  <FaGlobe /> Room <strong>{roomCode}</strong> · {myRole === 'p1' ? 'Host / P1' : 'Guest / P2'}
+                  {peerConnected
+                    ? <span className="status-pill connected">Connected</span>
+                    : <span className="status-pill waiting">Opponent disconnected</span>}
+                  {isMyTurn
+                    ? <span className="status-pill connected">Your turn</span>
+                    : <span className="status-pill waiting">Opponent turn</span>}
                 </span>
               )}
             </div>
