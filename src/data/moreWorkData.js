@@ -39,4 +39,5 @@ export const moreWorkData = [
   { id: 'mw-30', src: 'img2/project31.jpg', title: 'Scifi Warrior', category: 'Character Design', description: 'Futuristic tactical soldier with energy shield.' },
   { id: 'mw-31', src: 'img2/project32.jpg', title: 'Soldier', category: 'Concept Art', description: 'Military soldier character rendering.' },
   { id: 'mw-32', src: 'img2/project33.jpg', title: 'Digital Sketch', category: 'Sketchbook', description: 'Speed painting digital concept sketch.' },
+  { id: 'mw-33', src: 'img2/shouzo-mascot.png', title: 'Shouzo Mascot Sheet', category: 'Character Design', description: 'Hand-drawn character sheet for Shouzo, the green alien mascot, exploring expressions and poses.' },
 ]

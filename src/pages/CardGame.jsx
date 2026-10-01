@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { cardsData } from '../data/universeData'
-import { projectsData } from '../data/projectsData'
+import { galleryCards } from '../data/galleryCards'
 import { 
   FaGamepad, 
   FaShieldAlt, 
@@ -31,8 +31,18 @@ import {
   FaVolumeMute,
   FaCrosshairs,
   FaRandom,
-  FaMusic
+  FaMusic,
+  FaSignOutAlt
 } from 'react-icons/fa'
+
+// Deck = the hand-authored Converging Reality cards plus every artwork in the
+// Work, More Work and Surreal galleries (see data/galleryCards.js).
+const CARD_POOL = [...cardsData, ...galleryCards]
+
+// Monotonic ids so no two card copies can ever collide (Date.now()+random did,
+// which surfaced as duplicate React keys once the pool grew past 90 cards).
+let cardUid = 0
+const nextCardUid = () => `c${++cardUid}`
 
 // Verified artwork images from your site portfolio (public folder & Surreal gallery)
 const heroImagePool = [
@@ -59,13 +69,22 @@ const heroTitlesPool = [
 ]
 
 // Lord of the Rings Inspired Web Audio Synthesizer
+// Browsers (Chrome on Android especially) cap the number of live AudioContexts,
+// so every sound must reuse one shared context instead of allocating a new one.
+let sharedAudioCtx = null
+const getAudioCtx = () => {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext
+  if (!AudioCtx) return null
+  if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx()
+  if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume()
+  return sharedAudioCtx
+}
+
 const playSFX = (type, enabled = true) => {
   if (!enabled) return
   try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext
-    if (!AudioCtx) return
-    const ctx = new AudioCtx()
-    if (ctx.state === 'suspended') ctx.resume()
+    const ctx = getAudioCtx()
+    if (!ctx) return
 
     const now = ctx.currentTime
 
@@ -268,10 +287,8 @@ class ChillMusicPlayer {
   start() {
     if (this.isPlaying) return
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext
-      if (!AudioCtx) return
-      this.ctx = new AudioCtx()
-      if (this.ctx.state === 'suspended') this.ctx.resume()
+      this.ctx = getAudioCtx()
+      if (!this.ctx) return
 
       this.isPlaying = true
       let bar = 0
@@ -346,10 +363,7 @@ class ChillMusicPlayer {
   stop() {
     this.isPlaying = false
     if (this.timer) clearTimeout(this.timer)
-    if (this.ctx) {
-      try { this.ctx.close() } catch (e) {}
-      this.ctx = null
-    }
+    this.ctx = null
   }
 }
 
@@ -398,6 +412,20 @@ const CardGame = () => {
   // Decks & Hands
   const [p1Deck, setP1Deck] = useState([])
   const [p2Deck, setP2Deck] = useState([])
+
+  // Live mirror of the decks: the AI's chained timeouts capture stale state, so
+  // draws read/write these refs to avoid handing the same card out twice.
+  const p1DeckRef = useRef([])
+  const p2DeckRef = useRef([])
+  const commitDeck = (player, next) => {
+    if (player === 'p1') {
+      p1DeckRef.current = next
+      setP1Deck(next)
+    } else {
+      p2DeckRef.current = next
+      setP2Deck(next)
+    }
+  }
   
   const [p1Hand, setP1Hand] = useState([])
   const [p2Hand, setP2Hand] = useState([])
@@ -405,6 +433,10 @@ const CardGame = () => {
   // Boards
   const [p1Board, setP1Board] = useState([])
   const [p2Board, setP2Board] = useState([])
+
+  // Live mirror so the AI can read its own board without side effects in an updater
+  const p2BoardRef = useRef([])
+  useEffect(() => { p2BoardRef.current = p2Board }, [p2Board])
   
   // Combat selection (click fallback & drag)
   const [selectedAttacker, setSelectedAttacker] = useState(null)
@@ -412,6 +444,11 @@ const CardGame = () => {
   // Drag-and-Drop Targeting Arrow & Floating Card State
   const [dragState, setDragState] = useState(null)
   const arenaRef = useRef(null)
+
+  // Touch drags start as "pending" and only become real drags once the finger
+  // moves past a threshold, so a sideways swipe still scrolls the hand row.
+  const pendingDragRef = useRef(null)
+  const suppressClickRef = useRef(false)
 
   // Turn state: 'p1' | 'p2'
   const [turn, setTurn] = useState('p1')
@@ -492,10 +529,9 @@ const CardGame = () => {
 
   // Create randomized deck
   const createDeck = () => {
-    const fullPool = [...cardsData, ...cardsData, ...cardsData]
-    return fullPool.sort(() => Math.random() - 0.5).map((card, idx) => ({
+    return [...CARD_POOL].sort(() => Math.random() - 0.5).map(card => ({
       ...card,
-      instanceId: `${card.id}-${idx}-${Date.now()}-${Math.floor(Math.random()*10000)}`
+      instanceId: `${card.id}-${nextCardUid()}`
     }))
   }
 
@@ -539,6 +575,15 @@ const CardGame = () => {
     return () => chillMusic.stop()
   }, [gameMode, musicEnabled])
 
+  // Phones get a full-bleed arena that hides the site chrome, so the match has
+  // to provide its own way out (the Exit button in the arena's top bar).
+  useEffect(() => {
+    if (gameMode !== 'playing') return
+    document.body.classList.add('arena-fullscreen')
+    window.scrollTo(0, 0)
+    return () => document.body.classList.remove('arena-fullscreen')
+  }, [gameMode])
+
   // Listen for BroadcastChannel & localStorage sync
   useEffect(() => {
     if (playMode !== 'online_2p' || !roomCode) return
@@ -566,8 +611,8 @@ const CardGame = () => {
         if (data.p2MaxMana !== undefined) setP2MaxMana(data.p2MaxMana)
         if (data.p1Hand) setP1Hand(data.p1Hand)
         if (data.p2Hand) setP2Hand(data.p2Hand)
-        if (data.p1Deck) setP1Deck(data.p1Deck)
-        if (data.p2Deck) setP2Deck(data.p2Deck)
+        if (data.p1Deck) commitDeck('p1', data.p1Deck)
+        if (data.p2Deck) commitDeck('p2', data.p2Deck)
         if (data.p1Board) setP1Board(data.p1Board)
         if (data.p2Board) setP2Board(data.p2Board)
         if (data.p1HeroImg) setP1HeroImg(data.p1HeroImg)
@@ -606,9 +651,41 @@ const CardGame = () => {
     }
   }, [playMode, roomCode, myRole, p1Hp, p2Hp, p1Mana, p1MaxMana, p2Mana, p2MaxMana, p1Hand, p2Hand, p1Deck, p2Deck, p1Board, p2Board, p1HeroImg, p2HeroImg, turn, turnCount, logs, winner, gameMode])
 
-  // Global Mouse Move & Mouse Up Listener for Drag-and-Drop Targeting
+  // Global Pointer Move & Pointer Up Listener for Drag-and-Drop Targeting.
+  // Pointer events cover mouse, touch and pen with one code path.
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const beginDrag = (pending, x, y) => {
+      const rect = pending.el.getBoundingClientRect()
+      setDragState({
+        isDragging: true,
+        type: pending.type,
+        item: pending.item,
+        startX: rect.left + rect.width / 2,
+        startY: rect.top + rect.height / 2,
+        currentX: x,
+        currentY: y
+      })
+      playSFX('draw', sfxEnabled)
+    }
+
+    const handlePointerMove = (e) => {
+      const pending = pendingDragRef.current
+      if (pending) {
+        const dx = e.clientX - pending.originX
+        const dy = e.clientY - pending.originY
+        // Any real upward movement means drag-to-play; a flat sideways swipe
+        // stays with the scrolling hand row (the card declares touch-action: pan-x).
+        const moved = pending.axis === 'vertical'
+          ? Math.abs(dy) > 10
+          : Math.abs(dx) > 10 || Math.abs(dy) > 10
+        if (moved) {
+          pendingDragRef.current = null
+          suppressClickRef.current = true
+          beginDrag(pending, e.clientX, e.clientY)
+        }
+        return
+      }
+
       if (!dragState || !dragState.isDragging) return
       setDragState(prev => ({
         ...prev,
@@ -617,7 +694,8 @@ const CardGame = () => {
       }))
     }
 
-    const handleMouseUp = (e) => {
+    const handlePointerUp = (e) => {
+      pendingDragRef.current = null
       if (!dragState || !dragState.isDragging) return
 
       const elem = document.elementFromPoint(e.clientX, e.clientY)
@@ -650,22 +728,19 @@ const CardGame = () => {
       setDragState(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 0 && dragState) {
-        handleMouseMove(e.touches[0])
-      }
-    })
-    window.addEventListener('touchend', (e) => {
-      if (e.changedTouches.length > 0 && dragState) {
-        handleMouseUp(e.changedTouches[0])
-      }
-    })
+    const handlePointerCancel = () => {
+      pendingDragRef.current = null
+      setDragState(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerCancel)
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerCancel)
     }
   }, [dragState, turn, p1Board, p2Board])
 
@@ -673,13 +748,14 @@ const CardGame = () => {
   const handleStartDragAttacker = (e, unit, ownerPlayer) => {
     if (playMode === 'online_2p' && turn !== myRole) return
     if (ownerPlayer !== turn || !unit.readyToAttack) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    e.preventDefault()
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
 
-    setSelectedAttacker(unit)
+    // Selection is owned by the click/tap handler so a plain tap selects
+    // instead of being toggled straight back off.
     setDragState({
       isDragging: true,
       type: 'attack',
@@ -698,11 +774,27 @@ const CardGame = () => {
     if (playMode === 'online_2p' && turn !== myRole) return
     const currentMana = isP1 ? p1Mana : p2Mana
     if (currentMana < card.cost) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    e.preventDefault()
+    suppressClickRef.current = false
+
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
+
+    // Touch waits for a real move so a sideways swipe still scrolls the hand
+    // row (the card declares `touch-action: pan-x`).
+    if (e.pointerType === 'touch') {
+      pendingDragRef.current = {
+        type: 'play',
+        item: card,
+        el: e.currentTarget,
+        originX: e.clientX,
+        originY: e.clientY,
+        axis: 'vertical'
+      }
+      return
+    }
 
     setDragState({
       isDragging: true,
@@ -738,9 +830,9 @@ const CardGame = () => {
     setP2Mana(1)
 
     setP1Hand(hand1)
-    setP1Deck(deck1Rem)
+    commitDeck('p1', deck1Rem)
     setP2Hand(hand2)
-    setP2Deck(deck2Rem)
+    commitDeck('p2', deck2Rem)
 
     setP1Board([])
     setP2Board([])
@@ -752,7 +844,7 @@ const CardGame = () => {
     setStats({ damageDealt: 0, cardsPlayed: 0, unitsDestroyed: 0 })
 
     const modeName = overrideMode === 'single' ? 'Single Player vs AI' : overrideMode === 'local_2p' ? 'Local 2-Player (Pass & Play)' : 'Online Multi-Tab Arena'
-    const startMsg = `⚔️ Battle initiated in ${modeName}! Drag cards to play & drag units to attack!`
+    const startMsg = `⚔️ Battle initiated in ${modeName}! Tap cards to play & tap units to attack (drag works on desktop)!`
     setLogs([startMsg])
 
     setGameMode('playing')
@@ -809,31 +901,32 @@ const CardGame = () => {
   // Draw card for player
   const drawCard = (targetPlayer, count = 1) => {
     playSFX('draw', sfxEnabled)
-    if (targetPlayer === 'p1') {
-      if (p1Deck.length === 0) {
-        addLog('⚠️ Player 1 deck is empty! 2 fatigue damage.')
+    const deck = targetPlayer === 'p1' ? p1DeckRef.current : p2DeckRef.current
+
+    if (deck.length === 0) {
+      const label = targetPlayer === 'p1' ? 'Player 1' : 'Player 2'
+      addLog(`⚠️ ${label} deck is empty! 2 fatigue damage.`)
+      if (targetPlayer === 'p1') {
         setP1Hp(prev => Math.max(0, prev - 2))
         triggerFloatingDmg('hero-p1', '-2 Fatigue', 'dmg')
-        return
-      }
-      const drawn = p1Deck.slice(0, count)
-      const remaining = p1Deck.slice(count)
-      setP1Hand(prev => [...prev, ...drawn])
-      setP1Deck(remaining)
-      addLog(`🎴 Player 1 drew ${drawn.map(c => c.name).join(', ')}.`)
-    } else {
-      if (p2Deck.length === 0) {
-        addLog('⚠️ Player 2 deck is empty! 2 fatigue damage.')
+      } else {
         setP2Hp(prev => Math.max(0, prev - 2))
         triggerFloatingDmg('hero-p2', '-2 Fatigue', 'dmg')
-        return
       }
-      const drawn = p2Deck.slice(0, count)
-      const remaining = p2Deck.slice(count)
-      setP2Hand(prev => [...prev, ...drawn])
-      setP2Deck(remaining)
-      addLog(`🎴 Player 2 drew ${drawn.map(c => c.name).join(', ')}.`)
+      return
     }
+
+    // Fresh ids per drawn copy keep hand keys unique even if a chained timeout
+    // fires the same draw twice.
+    const drawn = deck.slice(0, count).map(c => ({ ...c, instanceId: `${c.id}-${nextCardUid()}` }))
+    commitDeck(targetPlayer, deck.slice(count))
+
+    if (targetPlayer === 'p1') {
+      setP1Hand(prev => [...prev, ...drawn])
+    } else {
+      setP2Hand(prev => [...prev, ...drawn])
+    }
+    addLog(`🎴 ${targetPlayer === 'p1' ? 'Player 1' : 'Player 2'} drew ${drawn.map(c => c.name).join(', ')}.`)
   }
 
   // Use Hero Power
@@ -1035,7 +1128,7 @@ const CardGame = () => {
     } else {
       setSelectedAttacker(unit)
       playSFX('draw', sfxEnabled)
-      addLog(`🎯 Selected ${unit.card.name}. Click or DRAG to an opponent unit or Hero to attack!`)
+      addLog(`🎯 Selected ${unit.card.name}. Tap an opponent unit or Hero to attack!`)
     }
   }
 
@@ -1225,92 +1318,90 @@ const CardGame = () => {
 
   // AI Turn Logic for Single Player
   useEffect(() => {
-    if (playMode === 'single' && turn === 'p2' && gameMode === 'playing') {
-      const timer = setTimeout(() => {
-        const nextP2Max = Math.min(10, p2MaxMana + 1)
-        setP2MaxMana(nextP2Max)
-        setP2Mana(nextP2Max)
-        addLog(`🤖 Enemy Turn ${turnCount + 1}: Refilled Mana (${nextP2Max}/${nextP2Max}).`)
+    if (playMode !== 'single' || turn !== 'p2' || gameMode !== 'playing') return
 
-        // AI plays card if possible
-        const availableCards = cardsData.filter(c => c.cost <= nextP2Max && c.type !== 'Spell')
-        if (availableCards.length > 0) {
-          const chosenCard = availableCards[Math.floor(Math.random() * availableCards.length)]
-          const aiUnit = {
-            instanceId: `ai-unit-${Date.now()}-${Math.random()}`,
-            card: chosenCard,
-            currentHp: chosenCard.health,
-            maxHp: chosenCard.health,
-            attack: chosenCard.attack,
-            hasTaunt: chosenCard.rarity === 'Legendary' || chosenCard.rarity === 'Epic',
-            readyToAttack: false,
-            isJustSummoned: true
-          }
-          setP2Board(prev => [...prev, aiUnit])
-          playSFX('cardPlay', sfxEnabled)
-          addLog(`🤖 ${p2HeroName} deployed ${chosenCard.name} (${chosenCard.attack}/${chosenCard.health})!`)
+    const timers = []
+    const after = (fn, ms) => { timers.push(setTimeout(fn, ms)); return timers[timers.length - 1] }
+
+    after(() => {
+      const nextP2Max = Math.min(10, p2MaxMana + 1)
+      setP2MaxMana(nextP2Max)
+      setP2Mana(nextP2Max)
+      addLog(`🤖 Enemy Turn ${turnCount + 1}: Refilled Mana (${nextP2Max}/${nextP2Max}).`)
+
+      // AI plays card if possible
+      const availableCards = CARD_POOL.filter(c => c.cost <= nextP2Max && c.type !== 'Spell')
+      if (availableCards.length > 0) {
+        const chosenCard = availableCards[Math.floor(Math.random() * availableCards.length)]
+        const aiUnit = {
+          instanceId: `ai-unit-${nextCardUid()}`,
+          card: chosenCard,
+          currentHp: chosenCard.health,
+          maxHp: chosenCard.health,
+          attack: chosenCard.attack,
+          hasTaunt: chosenCard.rarity === 'Legendary' || chosenCard.rarity === 'Epic',
+          readyToAttack: false,
+          isJustSummoned: true
         }
+        setP2Board(prev => [...prev, aiUnit])
+        playSFX('cardPlay', sfxEnabled)
+        addLog(`🤖 ${p2HeroName} deployed ${chosenCard.name} (${chosenCard.attack}/${chosenCard.health})!`)
+      }
 
-        // AI Attacks with Lunge SFX
-        setTimeout(() => {
-          setP2Board(prevP2Board => {
-            prevP2Board.forEach(aiUnit => {
-              if (aiUnit.attack > 0) {
-                setAttackingId(aiUnit.instanceId)
-                playSFX('attack', sfxEnabled)
+      // AI Attacks with Lunge SFX (board read from a ref, never from inside an updater)
+      after(() => {
+        p2BoardRef.current.filter(u => u.attack > 0).forEach(aiUnit => {
+          setAttackingId(aiUnit.instanceId)
+          playSFX('attack', sfxEnabled)
 
-                setTimeout(() => {
-                  playSFX('hit', sfxEnabled)
-                  triggerScreenShake()
+          after(() => {
+            playSFX('hit', sfxEnabled)
+            triggerScreenShake()
 
-                  setP1Board(pBoard => {
-                    const tauntUnits = pBoard.filter(u => u.hasTaunt && u.currentHp > 0)
-                    if (tauntUnits.length > 0) {
-                      const target = tauntUnits[0]
-                      triggerFloatingDmg(target.instanceId, `-${aiUnit.attack}`, 'dmg')
-                      addLog(`🚨 AI ${aiUnit.card.name} attacked your ${target.card.name} for ${aiUnit.attack} damage!`)
-                      return pBoard.map(u => u.instanceId === target.instanceId ? { ...u, currentHp: u.currentHp - aiUnit.attack } : u).filter(u => u.currentHp > 0)
-                    } else {
-                      triggerFloatingDmg('hero-p1', `-${aiUnit.attack}`, 'dmg')
-                      setP1Hp(pHp => {
-                        const nextHp = Math.max(0, pHp - aiUnit.attack)
-                        if (nextHp === 0) {
-                          setGameMode('defeat')
-                          setWinner('p2')
-                          playSFX('defeat', sfxEnabled)
-                          addLog('💀 DEFEAT! Your Hero has fallen.')
-                        }
-                        return nextHp
-                      })
-                      addLog(`💥 AI ${aiUnit.card.name} attacked your Hero for ${aiUnit.attack} damage!`)
-                      return pBoard
-                    }
-                  })
-
-                  setAttackingId(null)
-                }, 250)
+            setP1Board(pBoard => {
+              const tauntUnits = pBoard.filter(u => u.hasTaunt && u.currentHp > 0)
+              if (tauntUnits.length > 0) {
+                const target = tauntUnits[0]
+                triggerFloatingDmg(target.instanceId, `-${aiUnit.attack}`, 'dmg')
+                addLog(`🚨 AI ${aiUnit.card.name} attacked your ${target.card.name} for ${aiUnit.attack} damage!`)
+                return pBoard.map(u => u.instanceId === target.instanceId ? { ...u, currentHp: u.currentHp - aiUnit.attack } : u).filter(u => u.currentHp > 0)
+              } else {
+                triggerFloatingDmg('hero-p1', `-${aiUnit.attack}`, 'dmg')
+                setP1Hp(pHp => {
+                  const nextHp = Math.max(0, pHp - aiUnit.attack)
+                  if (nextHp === 0) {
+                    setGameMode('defeat')
+                    setWinner('p2')
+                    playSFX('defeat', sfxEnabled)
+                    addLog('💀 DEFEAT! Your Hero has fallen.')
+                  }
+                  return nextHp
+                })
+                addLog(`💥 AI ${aiUnit.card.name} attacked your Hero for ${aiUnit.attack} damage!`)
+                return pBoard
               }
             })
-            return prevP2Board
-          })
 
-          // Return turn to P1
-          setTimeout(() => {
-            const nextP1Max = Math.min(10, p1MaxMana + 1)
-            setP1MaxMana(nextP1Max)
-            setP1Mana(nextP1Max)
-            setTurnCount(c => c + 1)
-            setP1Board(board => board.map(u => ({ ...u, readyToAttack: true })))
-            drawCard('p1', 1)
-            setTurn('p1')
-            triggerTurnBanner('YOUR TURN', 'p1')
-            addLog(`⚡ Your turn begins! Mana refilled (${nextP1Max}/${nextP1Max}).`)
-          }, 800)
-        }, 1000)
+            setAttackingId(null)
+          }, 250)
+        })
+
+        // Return turn to P1
+        after(() => {
+          const nextP1Max = Math.min(10, p1MaxMana + 1)
+          setP1MaxMana(nextP1Max)
+          setP1Mana(nextP1Max)
+          setTurnCount(c => c + 1)
+          setP1Board(board => board.map(u => ({ ...u, readyToAttack: true })))
+          drawCard('p1', 1)
+          setTurn('p1')
+          triggerTurnBanner('YOUR TURN', 'p1')
+          addLog(`⚡ Your turn begins! Mana refilled (${nextP1Max}/${nextP1Max}).`)
+        }, 800)
       }, 1000)
+    }, 1000)
 
-      return () => clearTimeout(timer)
-    }
+    return () => timers.forEach(clearTimeout)
   }, [turn, gameMode, playMode])
 
   // Derive perspective views
@@ -1426,8 +1517,9 @@ const CardGame = () => {
             <ul>
               <li><strong>Randomized Hero Pictures:</strong> Every match generates fresh random hero portraits selected directly from your site work gallery!</li>
               <li><strong>Hearthstone Heroes:</strong> Authentic ornate hero portraits with Hero Power abilities & crystal mana!</li>
-              <li><strong>Drag & Attack:</strong> Drag a ready unit on your board directly onto an enemy unit or Hero to strike!</li>
-              <li><strong>Drag & Play:</strong> Drag a card from your hand onto the battlefield to summon/cast it!</li>
+              <li><strong>Tap or Drag to Attack:</strong> On a phone, tap a ready unit on your board then tap an enemy unit or Hero to strike. On desktop you can also drag it onto the target!</li>
+              <li><strong>Tap or Drag to Play:</strong> Tap a card in your hand to summon/cast it, or drag it onto the battlefield with a mouse!</li>
+              <li><strong>Portfolio Deck:</strong> Every artwork from the Work, More Work and Surreal galleries is a playable card — {CARD_POOL.length} unique cards in each deck!</li>
             </ul>
           </div>
 
@@ -1538,6 +1630,10 @@ const CardGame = () => {
             </div>
 
             <div className="arena-top-actions">
+              <button className="toggle-sfx-btn arena-exit-btn" onClick={() => setGameMode('menu')} title="Leave the match and return to the game menu">
+                <FaSignOutAlt /> Exit
+              </button>
+
               <button className={`toggle-sfx-btn ${musicEnabled ? 'active-music' : ''}`} onClick={() => setMusicEnabled(!musicEnabled)} title="Toggle Chill Background Music">
                 <FaMusic /> {musicEnabled ? 'Chill Music ON' : 'Chill Music OFF'}
               </button>
@@ -1570,7 +1666,7 @@ const CardGame = () => {
             <div 
               className={`hs-hero-frame ${selectedAttacker || (dragState && dragState.type === 'attack') ? 'targetable-hero-glow' : ''}`}
               onClick={() => handleAttackOpponentHero(oppPlayerTag)}
-              title={`Drag unit or click to attack ${oppHeroTitle}!`}
+              title={`Tap to attack ${oppHeroTitle}!`}
             >
               <div className="hs-hero-img-wrapper">
                 <img src={oppHeroImg} alt={oppHeroTitle} className="hs-hero-img" />
@@ -1662,7 +1758,7 @@ const CardGame = () => {
 
           {/* YOUR BOARD */}
           <div className="board-row player-board-row">
-            <div className="board-label">Your Battlefield ({myBoard.length}) - Drag ready units to attack!</div>
+            <div className="board-label">Your Battlefield ({myBoard.length}) - Tap a ready unit, then tap a target to attack!</div>
             <div className="board-cards-container">
               {myBoard.length > 0 ? (
                 myBoard.map(unit => {
@@ -1677,8 +1773,7 @@ const CardGame = () => {
                       data-unit-id={unit.instanceId}
                       data-owner={myPlayerTag}
                       className={`board-unit-card player-unit ${unit.readyToAttack ? 'ready drag-targetable' : 'exhausted'} ${isSelected ? 'selected' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-up' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
-                      onMouseDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
-                      onTouchStart={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
+                      onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
                       onClick={() => handleSelectAttacker(unit, myPlayerTag)}
                     >
                       {floatingDmg.filter(p => p.targetId === unit.instanceId).map(p => (
@@ -1686,7 +1781,7 @@ const CardGame = () => {
                       ))}
 
                       {unit.hasTaunt && <span className="taunt-badge">🛡️ Taunt</span>}
-                      {unit.readyToAttack && <span className="ready-indicator">✨ Ready (Drag to Attack)</span>}
+                      {unit.readyToAttack && <span className="ready-indicator">✨ Ready</span>}
                       <img src={unit.card.src} alt={unit.card.name} />
                       <div className="unit-name">{unit.card.name}</div>
                       <div className="unit-stats">
@@ -1697,7 +1792,7 @@ const CardGame = () => {
                   )
                 })
               ) : (
-                <div className="empty-board-slot">Your Battlefield is empty. Drag cards from hand to play!</div>
+                <div className="empty-board-slot">Your Battlefield is empty. Tap cards in your hand to play them!</div>
               )}
             </div>
           </div>
@@ -1746,7 +1841,7 @@ const CardGame = () => {
           {/* YOUR HAND CARDS */}
           <div className="player-hand-section">
             <div className="hand-title">
-              Your Hand ({myHand.length}) {hideHand ? '- [HIDDEN FOR PASS & PLAY]' : '- Drag a card onto the board to play it!'}
+              Your Hand ({myHand.length}) {hideHand ? '- [HIDDEN FOR PASS & PLAY]' : '- Tap a card to play it!'}
             </div>
 
             {hideHand ? (
@@ -1767,9 +1862,14 @@ const CardGame = () => {
                     <div 
                       key={card.instanceId} 
                       className={`hand-card ${rarityClass} ${canAfford ? 'playable hs-glow draggable-hand-card' : 'unplayable'}`}
-                      onMouseDown={(e) => canAfford && handleStartDragHandCard(e, card)}
-                      onTouchStart={(e) => canAfford && handleStartDragHandCard(e, card)}
-                      onClick={() => canAfford && handlePlayCard(card)}
+                      onPointerDown={(e) => canAfford && handleStartDragHandCard(e, card)}
+                      onClick={() => {
+                        if (suppressClickRef.current) {
+                          suppressClickRef.current = false
+                          return
+                        }
+                        if (canAfford) handlePlayCard(card)
+                      }}
                     >
                       <div className="hand-card-top">
                         <span className="hand-card-cost">{card.cost}</span>
