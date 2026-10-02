@@ -1,6 +1,7 @@
+import { supabase, isSupabaseConfigured } from '../supabaseClient'
 import React, { useState, useEffect, useRef } from 'react'
 import { cardsData } from '../data/universeData'
-import { projectsData } from '../data/projectsData'
+import { galleryCards } from '../data/galleryCards'
 import { 
   FaGamepad, 
   FaShieldAlt, 
@@ -31,7 +32,9 @@ import {
   FaVolumeMute,
   FaCrosshairs,
   FaRandom,
-  FaMusic
+  FaMusic,
+  FaSignOutAlt,
+  FaStar
 } from 'react-icons/fa'
 
 // Verified artwork images from your site portfolio (public folder & Surreal gallery)
@@ -59,13 +62,22 @@ const heroTitlesPool = [
 ]
 
 // Lord of the Rings Inspired Web Audio Synthesizer
+// Browsers (Chrome on Android especially) cap the number of live AudioContexts,
+// so every sound must reuse one shared context instead of allocating a new one.
+let sharedAudioCtx = null
+const getAudioCtx = () => {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext
+  if (!AudioCtx) return null
+  if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx()
+  if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume()
+  return sharedAudioCtx
+}
+
 const playSFX = (type, enabled = true) => {
   if (!enabled) return
   try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext
-    if (!AudioCtx) return
-    const ctx = new AudioCtx()
-    if (ctx.state === 'suspended') ctx.resume()
+    const ctx = getAudioCtx()
+    if (!ctx) return
 
     const now = ctx.currentTime
 
@@ -268,10 +280,8 @@ class ChillMusicPlayer {
   start() {
     if (this.isPlaying) return
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext
-      if (!AudioCtx) return
-      this.ctx = new AudioCtx()
-      if (this.ctx.state === 'suspended') this.ctx.resume()
+      this.ctx = getAudioCtx()
+      if (!this.ctx) return
 
       this.isPlaying = true
       let bar = 0
@@ -346,10 +356,7 @@ class ChillMusicPlayer {
   stop() {
     this.isPlaying = false
     if (this.timer) clearTimeout(this.timer)
-    if (this.ctx) {
-      try { this.ctx.close() } catch (e) {}
-      this.ctx = null
-    }
+    this.ctx = null
   }
 }
 
@@ -359,8 +366,11 @@ const CardGame = () => {
   // Game state mode: 'menu' | 'playing' | 'victory' | 'defeat'
   const [gameMode, setGameMode] = useState('menu')
   
-  // Play Mode: 'single' (vs AI) | 'local_2p' (Pass & Play) | 'online_2p' (P2P Tab Sync)
+  // Play Mode: 'single' (vs AI) | 'local_2p' (Pass & Play) | 'online_2p' (realtime 2 devices)
   const [playMode, setPlayMode] = useState('single')
+
+  // AI difficulty for Single Player: 'easy' | 'medium' | 'hard'
+  const [difficulty, setDifficulty] = useState('medium')
   
   // Multiplayer Role: 'p1' | 'p2'
   const [myRole, setMyRole] = useState('p1')
@@ -376,10 +386,13 @@ const CardGame = () => {
   const [p2HeroName, setP2HeroName] = useState('Nyx (Chrono Sentinel)')
 
   // Online Room State
-  const [roomCode, setRoomCode] = useState('7842')
+  const [roomCode, setRoomCode] = useState('')
   const [inputRoomCode, setInputRoomCode] = useState('')
   const [onlineStatus, setOnlineStatus] = useState('idle')
+  const [onlineError, setOnlineError] = useState('')
   const [peerConnected, setPeerConnected] = useState(false)
+  const [copiedCode, setCopiedCode] = useState(false)
+  const [syncNonce, setSyncNonce] = useState(0)
 
   // Pass & Play options
   const [hideHand, setHideHand] = useState(false)
@@ -398,6 +411,20 @@ const CardGame = () => {
   // Decks & Hands
   const [p1Deck, setP1Deck] = useState([])
   const [p2Deck, setP2Deck] = useState([])
+
+  // Live mirror of the decks: the AI's chained timeouts capture stale state, so
+  // draws read/write these refs to avoid handing the same card out twice.
+  const p1DeckRef = useRef([])
+  const p2DeckRef = useRef([])
+  const commitDeck = (player, next) => {
+    if (player === 'p1') {
+      p1DeckRef.current = next
+      setP1Deck(next)
+    } else {
+      p2DeckRef.current = next
+      setP2Deck(next)
+    }
+  }
   
   const [p1Hand, setP1Hand] = useState([])
   const [p2Hand, setP2Hand] = useState([])
@@ -405,16 +432,29 @@ const CardGame = () => {
   // Boards
   const [p1Board, setP1Board] = useState([])
   const [p2Board, setP2Board] = useState([])
+
+  // Live mirror so the AI can read its own board without side effects in an updater
+  const p2BoardRef = useRef([])
+  useEffect(() => { p2BoardRef.current = p2Board }, [p2Board])
+
+  // The AI sequences several attacks per turn, so it also needs live views of
+  // the player's board and HP (state values would be stale between timeouts).
+  const p1BoardRef = useRef([])
+  useEffect(() => { p1BoardRef.current = p1Board }, [p1Board])
+  const p1HpRef = useRef(30)
+  useEffect(() => { p1HpRef.current = p1Hp }, [p1Hp])
   
   // Combat selection (click fallback & drag)
   const [selectedAttacker, setSelectedAttacker] = useState(null)
-
-  // Card preview
-  const [selectedCard, setSelectedCard] = useState(null)
   
   // Drag-and-Drop Targeting Arrow & Floating Card State
   const [dragState, setDragState] = useState(null)
   const arenaRef = useRef(null)
+
+  // Touch drags start as "pending" and only become real drags once the finger
+  // moves past a threshold, so a sideways swipe still scrolls the hand row.
+  const pendingDragRef = useRef(null)
+  const suppressClickRef = useRef(false)
 
   // Turn state: 'p1' | 'p2'
   const [turn, setTurn] = useState('p1')
@@ -440,8 +480,19 @@ const CardGame = () => {
     unitsDestroyed: 0
   })
 
-  // Channel ref for P2P Broadcast
+  // Channel ref for realtime multiplayer
   const channelRef = useRef(null)
+  const snapshotRef = useRef({})
+  const syncQueuedRef = useRef(false)
+  const applyingRemoteRef = useRef(false)
+  const playModeRef = useRef(playMode)
+  const myRoleRef = useRef(myRole)
+  const gameModeRef = useRef(gameMode)
+  const startedOnlineRef = useRef(false)
+
+  playModeRef.current = playMode
+  myRoleRef.current = myRole
+  gameModeRef.current = gameMode
 
   // Add message to battle log
   const addLog = (msg) => {
@@ -467,6 +518,7 @@ const CardGame = () => {
     setP1HeroName(name1)
     setP2HeroName(name2)
     addLog(`🎲 Heroes randomized! P1: ${name1}, P2: ${name2}`)
+    if (playModeRef.current === 'online_2p') queueSync()
   }
 
   // Trigger floating damage popup
@@ -495,42 +547,129 @@ const CardGame = () => {
 
   // Create randomized deck
   const createDeck = () => {
-    const fullPool = [...cardsData, ...cardsData, ...cardsData]
-    return fullPool.sort(() => Math.random() - 0.5).map((card, idx) => ({
+    return [...CARD_POOL].sort(() => Math.random() - 0.5).map(card => ({
       ...card,
-      instanceId: `${card.id}-${idx}-${Date.now()}-${Math.floor(Math.random()*10000)}`
+      instanceId: `${card.id}-${nextCardUid()}`
     }))
   }
 
-  // Generate random 4-digit code
   const generateRoomCode = () => {
-    return Math.floor(1000 + Math.random() * 9000).toString()
+    return Math.floor(100000 + Math.random() * 900000).toString()
   }
 
-  // Broadcast state helper for online mode
+  const buildSnapshot = (extraPayload = {}) => ({
+    type: extraPayload.type || 'STATE_UPDATE',
+    p1Hp,
+    p2Hp,
+    p1Mana,
+    p1MaxMana,
+    p2Mana,
+    p2MaxMana,
+    p1Hand,
+    p2Hand,
+    p1Deck,
+    p2Deck,
+    p1Board,
+    p2Board,
+    p1HeroImg,
+    p2HeroImg,
+    p1HeroName,
+    p2HeroName,
+    turn,
+    turnCount,
+    logs,
+    winner,
+    gameMode,
+    ...extraPayload
+  })
+
+  snapshotRef.current = buildSnapshot()
+
+  const queueSync = () => {
+    if (playModeRef.current !== 'online_2p') return
+    syncQueuedRef.current = true
+    setSyncNonce((n) => n + 1)
+  }
+
   const broadcastState = (extraPayload = {}) => {
-    if (playMode !== 'online_2p' || !channelRef.current) return
-
-    const fullState = {
-      type: 'STATE_UPDATE',
-      p1Hp, p2Hp,
-      p1Mana, p1MaxMana,
-      p2Mana, p2MaxMana,
-      p1Hand, p2Hand,
-      p1Deck, p2Deck,
-      p1Board, p2Board,
-      p1HeroImg, p2HeroImg,
-      p1HeroName, p2HeroName,
-      turn, turnCount,
-      logs, winner, gameMode,
-      ...extraPayload
-    }
-
-    try {
-      channelRef.current.postMessage(fullState)
-      localStorage.setItem(`cg_room_${roomCode}`, JSON.stringify({ state: fullState, timestamp: Date.now() }))
-    } catch (e) {}
+    if (playModeRef.current !== 'online_2p' || !channelRef.current?.send) return
+    const payload = { ...snapshotRef.current, ...extraPayload }
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'game_state',
+      payload
+    }).catch((error) => {
+      console.error('Supabase broadcast error:', error)
+    })
   }
+
+  const applyRemoteState = (data) => {
+    if (!data) return
+    applyingRemoteRef.current = true
+    setPeerConnected(true)
+
+    if (data.p1Hp !== undefined) setP1Hp(data.p1Hp)
+    if (data.p2Hp !== undefined) setP2Hp(data.p2Hp)
+    if (data.p1Mana !== undefined) setP1Mana(data.p1Mana)
+    if (data.p1MaxMana !== undefined) setP1MaxMana(data.p1MaxMana)
+    if (data.p2Mana !== undefined) setP2Mana(data.p2Mana)
+    if (data.p2MaxMana !== undefined) setP2MaxMana(data.p2MaxMana)
+    if (Array.isArray(data.p1Hand)) setP1Hand(data.p1Hand)
+    if (Array.isArray(data.p2Hand)) setP2Hand(data.p2Hand)
+    if (Array.isArray(data.p1Deck)) commitDeck('p1', data.p1Deck)
+    if (Array.isArray(data.p2Deck)) commitDeck('p2', data.p2Deck)
+    if (Array.isArray(data.p1Board)) setP1Board(data.p1Board)
+    if (Array.isArray(data.p2Board)) setP2Board(data.p2Board)
+    if (data.p1HeroImg) setP1HeroImg(data.p1HeroImg)
+    if (data.p2HeroImg) setP2HeroImg(data.p2HeroImg)
+    if (data.p1HeroName) setP1HeroName(data.p1HeroName)
+    if (data.p2HeroName) setP2HeroName(data.p2HeroName)
+    if (data.turn) {
+      setTurn((prev) => {
+        if (prev !== data.turn) {
+          triggerTurnBanner(data.turn === 'p1' ? 'PLAYER 1 TURN' : 'PLAYER 2 TURN', data.turn)
+        }
+        return data.turn
+      })
+    }
+    if (data.turnCount !== undefined) setTurnCount(data.turnCount)
+    if (Array.isArray(data.logs)) setLogs(data.logs)
+    if (data.winner !== undefined) setWinner(data.winner)
+    if (data.gameMode) setGameMode(data.gameMode)
+  }
+
+  useEffect(() => {
+    const hash = window.location.hash || ''
+    const queryIndex = hash.indexOf('?')
+    if (queryIndex === -1) return
+    const params = new URLSearchParams(hash.slice(queryIndex))
+    const code = (params.get('room') || '').replace(/\D/g, '').slice(0, 6)
+    const role = params.get('role')
+    if (code.length === 6 && role !== 'p1') {
+      setPlayMode('online_2p')
+      setInputRoomCode(code)
+      setRoomCode(code)
+      setMyRole('p2')
+      setOnlineStatus('joining')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (applyingRemoteRef.current) {
+      applyingRemoteRef.current = false
+      syncQueuedRef.current = false
+      return
+    }
+    if (!syncQueuedRef.current) return
+    if (playMode !== 'online_2p' || !channelRef.current?.send) return
+    syncQueuedRef.current = false
+    broadcastState()
+  }, [
+    playMode, p1Hp, p2Hp, p1Mana, p1MaxMana, p2Mana, p2MaxMana,
+    p1Hand, p2Hand, p1Deck, p2Deck, p1Board, p2Board,
+    p1HeroImg, p2HeroImg, p1HeroName, p2HeroName,
+    turn, turnCount, logs, winner, gameMode, syncNonce
+  ])
 
   // Chill Background Music Controller
   useEffect(() => {
@@ -542,76 +681,136 @@ const CardGame = () => {
     return () => chillMusic.stop()
   }, [gameMode, musicEnabled])
 
-  // Listen for BroadcastChannel & localStorage sync
+  // Phones get a full-bleed arena that hides the site chrome, so the match has
+  // to provide its own way out (the Exit button in the arena's top bar).
   useEffect(() => {
-    if (playMode !== 'online_2p' || !roomCode) return
+    if (gameMode !== 'playing') return
+    document.body.classList.add('arena-fullscreen')
+    window.scrollTo(0, 0)
+    return () => document.body.classList.remove('arena-fullscreen')
+  }, [gameMode])
+
+  useEffect(() => {
+    if (playMode !== 'online_2p' || !roomCode || !myRole) return
+    if (!isSupabaseConfigured || !supabase) {
+      setOnlineError('Online play is missing Supabase keys. Add VITE_SUPABASE_URL and the publishable key to .env.')
+      setOnlineStatus('error')
+      return
+    }
 
     const channelName = `card_game_room_${roomCode}`
-    const bc = new BroadcastChannel(channelName)
-    channelRef.current = bc
+    const sessionKey = `${myRole}-${Math.random().toString(36).slice(2, 8)}`
+    const channel = supabase.channel(channelName, {
+      config: {
+        broadcast: { ack: true, self: false },
+        presence: { key: sessionKey }
+      }
+    })
 
-    const handleMessage = (data) => {
-      if (!data) return
+    channelRef.current = channel
 
-      if (data.type === 'PEER_JOINED') {
+    const markOpponentPresent = () => {
+      const players = Object.values(channel.presenceState()).flat()
+      const hasOpponent = players.some((player) => player.role && player.role !== myRole)
+      if (hasOpponent) {
         setPeerConnected(true)
-        setOnlineStatus('connected')
-        addLog('🌐 Player 2 connected to the arena!')
-        if (myRole === 'p1') {
-          broadcastState({ type: 'GAME_START_SYNC' })
+        setOnlineError('')
+        if (myRole === 'p1' && gameModeRef.current === 'playing') {
+          queueSync()
         }
-      } else if (data.type === 'GAME_START_SYNC' || data.type === 'STATE_UPDATE') {
-        if (data.p1Hp !== undefined) setP1Hp(data.p1Hp)
-        if (data.p2Hp !== undefined) setP2Hp(data.p2Hp)
-        if (data.p1Mana !== undefined) setP1Mana(data.p1Mana)
-        if (data.p1MaxMana !== undefined) setP1MaxMana(data.p1MaxMana)
-        if (data.p2Mana !== undefined) setP2Mana(data.p2Mana)
-        if (data.p2MaxMana !== undefined) setP2MaxMana(data.p2MaxMana)
-        if (data.p1Hand) setP1Hand(data.p1Hand)
-        if (data.p2Hand) setP2Hand(data.p2Hand)
-        if (data.p1Deck) setP1Deck(data.p1Deck)
-        if (data.p2Deck) setP2Deck(data.p2Deck)
-        if (data.p1Board) setP1Board(data.p1Board)
-        if (data.p2Board) setP2Board(data.p2Board)
-        if (data.p1HeroImg) setP1HeroImg(data.p1HeroImg)
-        if (data.p2HeroImg) setP2HeroImg(data.p2HeroImg)
-        if (data.p1HeroName) setP1HeroName(data.p1HeroName)
-        if (data.p2HeroName) setP2HeroName(data.p2HeroName)
-        if (data.turn && data.turn !== turn) {
-          setTurn(data.turn)
-          triggerTurnBanner(data.turn === 'p1' ? 'PLAYER 1 TURN' : 'PLAYER 2 TURN', data.turn)
-        }
-        if (data.turnCount) setTurnCount(data.turnCount)
-        if (data.logs) setLogs(data.logs)
-        if (data.gameMode) setGameMode(data.gameMode)
-        if (data.winner !== undefined) setWinner(data.winner)
-        setPeerConnected(true)
-        setOnlineStatus('connected')
       }
     }
 
-    bc.onmessage = (e) => handleMessage(e.data)
-
-    const handleStorageChange = (e) => {
-      if (e.key === `cg_room_${roomCode}` && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue)
-          if (parsed && parsed.state) handleMessage(parsed.state)
-        } catch (err) {}
-      }
-    }
-
-    window.addEventListener('storage', handleStorageChange)
+    channel
+      .on('broadcast', { event: 'game_state' }, ({ payload }) => {
+        applyRemoteState(payload)
+      })
+      .on('broadcast', { event: 'peer_joined' }, ({ payload }) => {
+        if (payload?.role && payload.role !== myRole) {
+          setPeerConnected(true)
+          setOnlineError('')
+          addLog('🌐 Opponent connected to the arena!')
+          if (myRole === 'p1' && gameModeRef.current === 'playing') {
+            queueSync()
+          }
+        }
+      })
+      .on('presence', { event: 'sync' }, markOpponentPresent)
+      .on('presence', { event: 'join' }, markOpponentPresent)
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ role: myRole, joinedAt: Date.now() })
+          await channel.send({
+            type: 'broadcast',
+            event: 'peer_joined',
+            payload: { role: myRole }
+          })
+          if (myRole === 'p1' && gameModeRef.current === 'playing') {
+            queueSync()
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setOnlineStatus('error')
+          setOnlineError('Could not reach the realtime server. Check your connection and try again.')
+        }
+      })
 
     return () => {
-      bc.close()
-      window.removeEventListener('storage', handleStorageChange)
+      if (channelRef.current === channel) {
+        channelRef.current = null
+      }
+      supabase.removeChannel(channel)
     }
-  }, [playMode, roomCode, myRole, p1Hp, p2Hp, p1Mana, p1MaxMana, p2Mana, p2MaxMana, p1Hand, p2Hand, p1Deck, p2Deck, p1Board, p2Board, p1HeroImg, p2HeroImg, turn, turnCount, logs, winner, gameMode])
+  }, [playMode, roomCode, myRole])
 
-  // Global Mouse Move & Mouse Up Listener for Drag-and-Drop Targeting
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    if (playMode !== 'online_2p' || myRole !== 'p1' || !peerConnected) return
+    if (gameMode === 'menu' && !startedOnlineRef.current) {
+      startedOnlineRef.current = true
+      handleStartGame('online_2p', 'p1')
+      return
+    }
+    if (gameMode === 'playing') {
+      queueSync()
+    }
+  }, [peerConnected, playMode, myRole, gameMode])
+
+  // Global Pointer Move & Pointer Up Listener for Drag-and-Drop Targeting.
+  // Pointer events cover mouse, touch and pen with one code path.
+  useEffect(() => {
+    const beginDrag = (pending, x, y) => {
+      const rect = pending.el?.getBoundingClientRect?.()
+      const startX = rect ? rect.left + rect.width / 2 : x
+      const startY = rect ? rect.top + rect.height / 2 : y
+      setDragState({
+        isDragging: true,
+        type: pending.type,
+        item: pending.item,
+        startX,
+        startY,
+        currentX: x,
+        currentY: y
+      })
+      playSFX('draw', sfxEnabled)
+    }
+
+    const handlePointerMove = (e) => {
+      const pending = pendingDragRef.current
+      if (pending) {
+        const dx = e.clientX - pending.originX
+        const dy = e.clientY - pending.originY
+        // Any real upward movement means drag-to-play; a flat sideways swipe
+        // stays with the scrolling hand row (the card declares touch-action: pan-x).
+        const moved = pending.axis === 'vertical'
+          ? Math.abs(dy) > 10
+          : Math.abs(dx) > 10 || Math.abs(dy) > 10
+        if (moved) {
+          pendingDragRef.current = null
+          suppressClickRef.current = true
+          beginDrag(pending, e.clientX, e.clientY)
+        }
+        return
+      }
+
       if (!dragState || !dragState.isDragging) return
       setDragState(prev => ({
         ...prev,
@@ -620,7 +819,8 @@ const CardGame = () => {
       }))
     }
 
-    const handleMouseUp = (e) => {
+    const handlePointerUp = (e) => {
+      pendingDragRef.current = null
       if (!dragState || !dragState.isDragging) return
 
       const elem = document.elementFromPoint(e.clientX, e.clientY)
@@ -653,22 +853,19 @@ const CardGame = () => {
       setDragState(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 0 && dragState) {
-        handleMouseMove(e.touches[0])
-      }
-    })
-    window.addEventListener('touchend', (e) => {
-      if (e.changedTouches.length > 0 && dragState) {
-        handleMouseUp(e.changedTouches[0])
-      }
-    })
+    const handlePointerCancel = () => {
+      pendingDragRef.current = null
+      setDragState(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerCancel)
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerCancel)
     }
   }, [dragState, turn, p1Board, p2Board])
 
@@ -676,13 +873,14 @@ const CardGame = () => {
   const handleStartDragAttacker = (e, unit, ownerPlayer) => {
     if (playMode === 'online_2p' && turn !== myRole) return
     if (ownerPlayer !== turn || !unit.readyToAttack) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    e.preventDefault()
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
 
-    setSelectedAttacker(unit)
+    // Selection is owned by the click/tap handler so a plain tap selects
+    // instead of being toggled straight back off.
     setDragState({
       isDragging: true,
       type: 'attack',
@@ -701,11 +899,27 @@ const CardGame = () => {
     if (playMode === 'online_2p' && turn !== myRole) return
     const currentMana = isP1 ? p1Mana : p2Mana
     if (currentMana < card.cost) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    e.preventDefault()
+    suppressClickRef.current = false
+
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
+
+    // Touch waits for a real move so a sideways swipe still scrolls the hand
+    // row (the card declares `touch-action: pan-x`).
+    if (e.pointerType === 'touch') {
+      pendingDragRef.current = {
+        type: 'play',
+        item: card,
+        el: e.currentTarget,
+        originX: e.clientX,
+        originY: e.clientY,
+        axis: 'vertical'
+      }
+      return
+    }
 
     setDragState({
       isDragging: true,
@@ -718,17 +932,6 @@ const CardGame = () => {
     })
     playSFX('draw', sfxEnabled)
   }
-
-  // Open card preview
-const handleCardPreview = (card) => {
-  setSelectedCard(card)
-  playSFX('draw', sfxEnabled)
-}
-
-// Close card preview
-const closeCardPreview = () => {
-  setSelectedCard(null)
-}
 
   // Start Game initialization
   const handleStartGame = (overrideMode = playMode, overrideRole = myRole) => {
@@ -752,9 +955,9 @@ const closeCardPreview = () => {
     setP2Mana(1)
 
     setP1Hand(hand1)
-    setP1Deck(deck1Rem)
+    commitDeck('p1', deck1Rem)
     setP2Hand(hand2)
-    setP2Deck(deck2Rem)
+    commitDeck('p2', deck2Rem)
 
     setP1Board([])
     setP2Board([])
@@ -765,89 +968,107 @@ const closeCardPreview = () => {
     setWinner(null)
     setStats({ damageDealt: 0, cardsPlayed: 0, unitsDestroyed: 0 })
 
-    const modeName = overrideMode === 'single' ? 'Single Player vs AI' : overrideMode === 'local_2p' ? 'Local 2-Player (Pass & Play)' : 'Online Multi-Tab Arena'
-    const startMsg = `⚔️ Battle initiated in ${modeName}! Drag cards to play & drag units to attack!`
+    const modeName = overrideMode === 'single' ? 'Single Player vs AI' : overrideMode === 'local_2p' ? 'Local 2-Player (Pass & Play)' : 'Online 2-Player'
+    const startMsg = `⚔️ Battle initiated in ${modeName}! Tap cards to play & tap units to attack (drag works on desktop)!`
     setLogs([startMsg])
 
     setGameMode('playing')
-    triggerTurnBanner('BATTLE START! YOUR TURN', 'p1')
+    triggerTurnBanner(overrideRole === 'p1' ? 'BATTLE START! YOUR TURN' : 'BATTLE START!', 'p1')
 
-    if (overrideMode === 'online_2p' && channelRef.current) {
-      setTimeout(() => {
-        broadcastState({
-          type: 'GAME_START_SYNC',
-          p1Hp: 30, p2Hp: 30,
-          p1Mana: 1, p1MaxMana: 1,
-          p2Mana: 1, p2MaxMana: 1,
-          p1Hand: hand1, p2Hand: hand2,
-          p1Deck: deck1Rem, p2Deck: deck2Rem,
-          p1Board: [], p2Board: [],
-          turn: 'p1', turnCount: 1,
-          logs: [startMsg], gameMode: 'playing', winner: null
-        })
-      }, 200)
+    if (overrideMode === 'online_2p') {
+      queueSync()
     }
   }
 
-  // Host Online Room
+  const handleCancelOnline = () => {
+    startedOnlineRef.current = false
+    setPeerConnected(false)
+    setOnlineStatus('idle')
+    setRoomCode('')
+    setOnlineError('')
+    setGameMode('menu')
+  }
+
+  const handleCopyRoomCode = async () => {
+    if (!roomCode) return
+    const shareUrl = `${window.location.origin}${window.location.pathname}#/game?room=${roomCode}&role=p2`
+    try {
+      await navigator.clipboard.writeText(`${roomCode}\n${shareUrl}`)
+      setCopiedCode(true)
+      setTimeout(() => setCopiedCode(false), 1800)
+    } catch (err) {
+      setOnlineError('Could not copy. Select the code and copy it manually.')
+    }
+  }
+
   const handleHostRoom = () => {
+    if (!isSupabaseConfigured) {
+      setOnlineStatus('error')
+      setOnlineError('Online play is not configured. Add Supabase keys to .env and restart the dev server.')
+      return
+    }
     const code = generateRoomCode()
+    startedOnlineRef.current = false
+    setPeerConnected(false)
+    setOnlineError('')
     setRoomCode(code)
     setMyRole('p1')
     setPlayMode('online_2p')
     setOnlineStatus('hosting')
-    handleStartGame('online_2p', 'p1')
-    addLog(`🔑 Room ${code} created. Share code or open in a 2nd tab to play!`)
+    setGameMode('menu')
   }
 
-  // Join Online Room
   const handleJoinRoom = () => {
-    if (!inputRoomCode.trim()) return
-    const code = inputRoomCode.trim()
+    const code = (inputRoomCode || '').replace(/\D/g, '').slice(0, 6)
+    if (code.length < 6) {
+      setOnlineStatus('error')
+      setOnlineError('Enter the 6-digit room code from the host.')
+      return
+    }
+    if (!isSupabaseConfigured) {
+      setOnlineStatus('error')
+      setOnlineError('Online play is not configured. Add Supabase keys to .env and restart the dev server.')
+      return
+    }
+    startedOnlineRef.current = false
+    setPeerConnected(false)
+    setOnlineError('')
     setRoomCode(code)
     setMyRole('p2')
     setPlayMode('online_2p')
-    setOnlineStatus('joined')
-    setGameMode('playing')
-
-    setTimeout(() => {
-      if (channelRef.current) {
-        channelRef.current.postMessage({ type: 'PEER_JOINED' })
-        try {
-          localStorage.setItem(`cg_room_${code}`, JSON.stringify({ state: { type: 'PEER_JOINED' }, timestamp: Date.now() }))
-        } catch (e) {}
-      }
-    }, 300)
+    setOnlineStatus('joining')
+    setGameMode('menu')
   }
 
   // Draw card for player
   const drawCard = (targetPlayer, count = 1) => {
     playSFX('draw', sfxEnabled)
-    if (targetPlayer === 'p1') {
-      if (p1Deck.length === 0) {
-        addLog('⚠️ Player 1 deck is empty! 2 fatigue damage.')
+    const deck = targetPlayer === 'p1' ? p1DeckRef.current : p2DeckRef.current
+
+    if (deck.length === 0) {
+      const label = targetPlayer === 'p1' ? 'Player 1' : 'Player 2'
+      addLog(`⚠️ ${label} deck is empty! 2 fatigue damage.`)
+      if (targetPlayer === 'p1') {
         setP1Hp(prev => Math.max(0, prev - 2))
         triggerFloatingDmg('hero-p1', '-2 Fatigue', 'dmg')
-        return
-      }
-      const drawn = p1Deck.slice(0, count)
-      const remaining = p1Deck.slice(count)
-      setP1Hand(prev => [...prev, ...drawn])
-      setP1Deck(remaining)
-      addLog(`🎴 Player 1 drew ${drawn.map(c => c.name).join(', ')}.`)
-    } else {
-      if (p2Deck.length === 0) {
-        addLog('⚠️ Player 2 deck is empty! 2 fatigue damage.')
+      } else {
         setP2Hp(prev => Math.max(0, prev - 2))
         triggerFloatingDmg('hero-p2', '-2 Fatigue', 'dmg')
-        return
       }
-      const drawn = p2Deck.slice(0, count)
-      const remaining = p2Deck.slice(count)
-      setP2Hand(prev => [...prev, ...drawn])
-      setP2Deck(remaining)
-      addLog(`🎴 Player 2 drew ${drawn.map(c => c.name).join(', ')}.`)
+      return
     }
+
+    // Fresh ids per drawn copy keep hand keys unique even if a chained timeout
+    // fires the same draw twice.
+    const drawn = deck.slice(0, count).map(c => ({ ...c, instanceId: `${c.id}-${nextCardUid()}` }))
+    commitDeck(targetPlayer, deck.slice(count))
+
+    if (targetPlayer === 'p1') {
+      setP1Hand(prev => [...prev, ...drawn])
+    } else {
+      setP2Hand(prev => [...prev, ...drawn])
+    }
+    addLog(`🎴 ${targetPlayer === 'p1' ? 'Player 1' : 'Player 2'} drew ${drawn.map(c => c.name).join(', ')}.`)
   }
 
   // Use Hero Power
@@ -896,7 +1117,7 @@ const closeCardPreview = () => {
     addLog(`⚡ ${isP1 ? p1HeroName : p2HeroName} used Hero Power for ${dmg} direct damage!`)
 
     if (playMode === 'online_2p') {
-      setTimeout(() => broadcastState(), 100)
+      queueSync()
     }
   }
 
@@ -1023,7 +1244,7 @@ const closeCardPreview = () => {
     }
 
     if (playMode === 'online_2p') {
-      setTimeout(() => broadcastState(), 100)
+      queueSync()
     }
   }
 
@@ -1049,7 +1270,7 @@ const closeCardPreview = () => {
     } else {
       setSelectedAttacker(unit)
       playSFX('draw', sfxEnabled)
-      addLog(`🎯 Selected ${unit.card.name}. Click or DRAG to an opponent unit or Hero to attack!`)
+      addLog(`🎯 Selected ${unit.card.name}. Tap an opponent unit or Hero to attack!`)
     }
   }
 
@@ -1125,7 +1346,7 @@ const closeCardPreview = () => {
         setSelectedAttacker(null)
 
         if (playMode === 'online_2p') {
-          setTimeout(() => broadcastState(), 100)
+          queueSync()
         }
       }, 350)
     }, 250)
@@ -1194,7 +1415,7 @@ const closeCardPreview = () => {
       setSelectedAttacker(null)
 
       if (playMode === 'online_2p') {
-        setTimeout(() => broadcastState(), 100)
+        queueSync()
       }
     }, 250)
   }
@@ -1233,83 +1454,148 @@ const closeCardPreview = () => {
     }
 
     if (playMode === 'online_2p') {
-      setTimeout(() => broadcastState({ turn: nextTurn }), 100)
+      queueSync()
     }
   }
 
   // AI Turn Logic for Single Player
   useEffect(() => {
-    if (playMode === 'single' && turn === 'p2' && gameMode === 'playing') {
-      const timer = setTimeout(() => {
-        const nextP2Max = Math.min(10, p2MaxMana + 1)
-        setP2MaxMana(nextP2Max)
-        setP2Mana(nextP2Max)
-        addLog(`🤖 Enemy Turn ${turnCount + 1}: Refilled Mana (${nextP2Max}/${nextP2Max}).`)
+    if (playMode !== 'single' || turn !== 'p2' || gameMode !== 'playing') return
 
-        // AI plays card if possible
-        const availableCards = cardsData.filter(c => c.cost <= nextP2Max && c.type !== 'Spell')
-        if (availableCards.length > 0) {
-          const chosenCard = availableCards[Math.floor(Math.random() * availableCards.length)]
-          const aiUnit = {
-            instanceId: `ai-unit-${Date.now()}-${Math.random()}`,
-            card: chosenCard,
-            currentHp: chosenCard.health,
-            maxHp: chosenCard.health,
-            attack: chosenCard.attack,
-            hasTaunt: chosenCard.rarity === 'Legendary' || chosenCard.rarity === 'Epic',
-            readyToAttack: false,
-            isJustSummoned: true
+    const cfg = DIFFICULTIES[difficulty] || DIFFICULTIES.medium
+    const timers = []
+    const after = (fn, ms) => { timers.push(setTimeout(fn, ms)) }
+
+    const damagePlayerHero = (amount, sourceName) => {
+      const nextHp = Math.max(0, p1HpRef.current - amount)
+      p1HpRef.current = nextHp
+      setP1Hp(nextHp)
+      triggerFloatingDmg('hero-p1', `-${amount}`, 'dmg')
+      playSFX('hit', sfxEnabled)
+      triggerScreenShake()
+      addLog(`💥 ${sourceName} hit your Hero for ${amount} damage!`)
+      if (nextHp === 0) {
+        setGameMode('defeat')
+        setWinner('p2')
+        playSFX('defeat', sfxEnabled)
+        addLog('💀 DEFEAT! Your Hero has fallen.')
+      }
+    }
+
+    const deploy = (card) => {
+      const unit = {
+        instanceId: `ai-unit-${nextCardUid()}`,
+        card,
+        currentHp: card.health,
+        maxHp: card.health,
+        attack: card.attack,
+        hasTaunt: card.rarity === 'Legendary' || card.rarity === 'Epic' || /taunt/i.test(card.ability || ''),
+        readyToAttack: false,
+        isJustSummoned: true
+      }
+      setP2Board(prev => [...prev, unit])
+      playSFX('cardPlay', sfxEnabled)
+      addLog(`🤖 ${p2HeroName} deployed ${card.name} (${card.attack}/${card.health})!`)
+    }
+
+    // Units already on board when the turn started — Easy only swings with these.
+    const veterans = p2BoardRef.current.map(u => u.instanceId)
+
+    after(() => {
+      const nextP2Max = Math.min(10, p2MaxMana + 1)
+      setP2MaxMana(nextP2Max)
+      setP2Mana(nextP2Max)
+      addLog(`🤖 ${cfg.title} — Turn ${turnCount + 1}: Refilled Mana (${nextP2Max}/${nextP2Max}).`)
+
+      // ---- Deployment plan ----
+      const plan = []
+      if (Math.random() < cfg.deployChance) {
+        const affordable = CARD_POOL.filter(c => c.cost <= nextP2Max && c.type !== 'Spell')
+        if (cfg.maxDeploys) {
+          // Hard curves out: biggest affordable card first, keeping 2 mana aside
+          // for its Hero Power once it has 4 or more.
+          let manaLeft = nextP2Max >= 4 ? nextP2Max - 2 : nextP2Max
+          for (let i = 0; i < cfg.maxDeploys && manaLeft > 0; i++) {
+            const opts = affordable.filter(c => c.cost <= manaLeft)
+            if (!opts.length) break
+            const best = opts.reduce((a, b) => (b.cost > a.cost ? b : a))
+            plan.push(best)
+            manaLeft -= best.cost
           }
-          setP2Board(prev => [...prev, aiUnit])
-          playSFX('cardPlay', sfxEnabled)
-          addLog(`🤖 ${p2HeroName} deployed ${chosenCard.name} (${chosenCard.attack}/${chosenCard.health})!`)
+        } else if (affordable.length) {
+          // Easy sticks to cheap cards, Medium picks freely
+          const cheap = affordable.filter(c => c.cost <= Math.max(1, Math.ceil(nextP2Max / 2)))
+          const pool = difficulty === 'easy' && cheap.length ? cheap : affordable
+          plan.push(pool[Math.floor(Math.random() * pool.length)])
+        }
+      }
+
+      const spent = plan.reduce((sum, c) => sum + c.cost, 0)
+      plan.forEach((card, i) => after(() => deploy(card), 380 * i))
+
+      // ---- Attack phase ----
+      after(() => {
+        let attackers = p2BoardRef.current.filter(u => u.attack > 0 && u.currentHp > 0)
+        if (cfg.summoningSickness) attackers = attackers.filter(u => veterans.includes(u.instanceId))
+        if (cfg.attackRatio < 1 && attackers.length > 1) {
+          attackers = attackers.slice(0, Math.max(1, Math.round(attackers.length * cfg.attackRatio)))
         }
 
-        // AI Attacks with Lunge SFX
-        setTimeout(() => {
-          setP2Board(prevP2Board => {
-            prevP2Board.forEach(aiUnit => {
-              if (aiUnit.attack > 0) {
-                setAttackingId(aiUnit.instanceId)
-                playSFX('attack', sfxEnabled)
+        const totalAttack = attackers.reduce((sum, u) => sum + u.attack, 0)
+        const goFace = !!cfg.heroPower && totalAttack >= p1HpRef.current
+        let liveBoard = [...p1BoardRef.current]
 
-                setTimeout(() => {
-                  playSFX('hit', sfxEnabled)
-                  triggerScreenShake()
+        attackers.forEach((aiUnit, i) => {
+          after(() => {
+            if (p1HpRef.current <= 0) return
+            setAttackingId(aiUnit.instanceId)
+            playSFX('attack', sfxEnabled)
 
-                  setP1Board(pBoard => {
-                    const tauntUnits = pBoard.filter(u => u.hasTaunt && u.currentHp > 0)
-                    if (tauntUnits.length > 0) {
-                      const target = tauntUnits[0]
-                      triggerFloatingDmg(target.instanceId, `-${aiUnit.attack}`, 'dmg')
-                      addLog(`🚨 AI ${aiUnit.card.name} attacked your ${target.card.name} for ${aiUnit.attack} damage!`)
-                      return pBoard.map(u => u.instanceId === target.instanceId ? { ...u, currentHp: u.currentHp - aiUnit.attack } : u).filter(u => u.currentHp > 0)
-                    } else {
-                      triggerFloatingDmg('hero-p1', `-${aiUnit.attack}`, 'dmg')
-                      setP1Hp(pHp => {
-                        const nextHp = Math.max(0, pHp - aiUnit.attack)
-                        if (nextHp === 0) {
-                          setGameMode('defeat')
-                          setWinner('p2')
-                          playSFX('defeat', sfxEnabled)
-                          addLog('💀 DEFEAT! Your Hero has fallen.')
-                        }
-                        return nextHp
-                      })
-                      addLog(`💥 AI ${aiUnit.card.name} attacked your Hero for ${aiUnit.attack} damage!`)
-                      return pBoard
-                    }
-                  })
+            after(() => {
+              setAttackingId(null)
+              if (p1HpRef.current <= 0) return
 
-                  setAttackingId(null)
-                }, 250)
+              const taunts = liveBoard.filter(u => u.hasTaunt && u.currentHp > 0)
+              let target = null
+              if (taunts.length) {
+                // Hard kills the cheapest taunt it can, otherwise chips the weakest
+                target = cfg.heroPower
+                  ? (taunts.find(u => u.currentHp <= aiUnit.attack) || taunts.reduce((a, b) => (a.currentHp <= b.currentHp ? a : b)))
+                  : taunts[0]
+              } else if (cfg.heroPower && !goFace) {
+                const trades = liveBoard.filter(u => u.currentHp > 0 && u.currentHp <= aiUnit.attack && u.attack < aiUnit.currentHp)
+                if (trades.length) target = trades.sort((a, b) => (b.attack + b.currentHp) - (a.attack + a.currentHp))[0]
               }
-            })
-            return prevP2Board
-          })
 
-          // Return turn to P1
-          setTimeout(() => {
+              if (target) {
+                playSFX('hit', sfxEnabled)
+                triggerScreenShake()
+                triggerFloatingDmg(target.instanceId, `-${aiUnit.attack}`, 'dmg')
+                addLog(`🚨 AI ${aiUnit.card.name} attacked your ${target.card.name} for ${aiUnit.attack} damage!`)
+                liveBoard = liveBoard
+                  .map(u => (u.instanceId === target.instanceId ? { ...u, currentHp: u.currentHp - aiUnit.attack } : u))
+                  .filter(u => u.currentHp > 0)
+                setP1Board(liveBoard)
+              } else {
+                damagePlayerHero(aiUnit.attack, `AI ${aiUnit.card.name}`)
+              }
+            }, 250)
+          }, 400 * i)
+        })
+
+        // ---- Hero Power (Hard) then hand the turn back ----
+        after(() => {
+          if (p1HpRef.current <= 0) return
+          const manaLeft = Math.max(0, nextP2Max - spent)
+          if (cfg.heroPower && manaLeft >= 2) {
+            setP2Mana(manaLeft - 2)
+            playSFX('spell', sfxEnabled)
+            addLog(`🔮 ${p2HeroName} used their Hero Power!`)
+            damagePlayerHero(2, `${p2HeroName}'s Hero Power`)
+          }
+
+          after(() => {
+            if (p1HpRef.current <= 0) return
             const nextP1Max = Math.min(10, p1MaxMana + 1)
             setP1MaxMana(nextP1Max)
             setP1Mana(nextP1Max)
@@ -1319,13 +1605,13 @@ const closeCardPreview = () => {
             setTurn('p1')
             triggerTurnBanner('YOUR TURN', 'p1')
             addLog(`⚡ Your turn begins! Mana refilled (${nextP1Max}/${nextP1Max}).`)
-          }, 800)
-        }, 1000)
-      }, 1000)
+          }, 900)
+        }, 400 * attackers.length + 500)
+      }, 380 * plan.length + 700)
+    }, 900)
 
-      return () => clearTimeout(timer)
-    }
-  }, [turn, gameMode, playMode])
+    return () => timers.forEach(clearTimeout)
+  }, [turn, gameMode, playMode, difficulty])
 
   // Derive perspective views
   const isMeP1 = playMode === 'online_2p' ? myRole === 'p1' : (playMode === 'local_2p' ? turn === 'p1' : true)
@@ -1401,37 +1687,114 @@ const closeCardPreview = () => {
                 onClick={() => setPlayMode('online_2p')}
               >
                 <FaGlobe className="mode-icon" />
-                <span className="mode-title">Multi-Tab Online</span>
-                <span className="mode-desc">Room Code P2P Sync</span>
+                <span className="mode-title">Online 2-Player</span>
+                <span className="mode-desc">Two devices, one room code</span>
               </button>
             </div>
           </div>
 
+          {/* AI DIFFICULTY SELECTOR */}
+          {playMode === 'single' && (
+            <div className="mode-selection-container difficulty-selection-container">
+              <h3>Choose AI Difficulty</h3>
+              <div className="mode-selector-grid difficulty-grid">
+                {Object.entries(DIFFICULTIES).map(([key, cfg]) => {
+                  const Icon = cfg.icon
+                  return (
+                    <button
+                      key={key}
+                      className={`mode-btn difficulty-btn ${key} ${difficulty === key ? 'active' : ''}`}
+                      onClick={() => setDifficulty(key)}
+                    >
+                      <Icon className="mode-icon" />
+                      <span className="mode-title">{cfg.label}</span>
+                      <span className="mode-desc">{cfg.desc}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ONLINE ROOM CONFIGURATION */}
           {playMode === 'online_2p' && (
             <div className="room-config-box">
-              <h3><FaWifi /> Multi-Tab / P2P Room Connection</h3>
-              <p className="room-subtext">Host a game or enter a 4-digit code to join a game running in another tab or browser!</p>
+              <h3><FaWifi /> Online match</h3>
+              <p className="room-subtext">
+                Host creates a room, then the other player joins from any phone or computer using the code.
+                You do not need to be on the same Wi‑Fi.
+              </p>
 
-              <div className="room-actions">
-                <button className="host-room-btn" onClick={handleHostRoom}>
-                  <FaUsers /> Host New Game (Player 1)
-                </button>
+              {onlineStatus === 'hosting' && (
+                <div className="room-lobby" role="status" aria-live="polite">
+                  <p className="room-lobby-label">Share this room code</p>
+                  <div className="room-code-display">{roomCode}</div>
+                  <p className="room-subtext">
+                    {peerConnected
+                      ? 'Opponent found — starting the match…'
+                      : 'Waiting for Player 2 to join…'}
+                  </p>
+                  <div className="room-actions">
+                    <button type="button" className="join-room-btn" onClick={handleCopyRoomCode}>
+                      <FaCopy /> {copiedCode ? 'Copied' : 'Copy code & link'}
+                    </button>
+                    <button type="button" className="host-room-btn" onClick={handleCancelOnline}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
-                <div className="join-room-group">
-                  <input 
-                    type="text" 
-                    placeholder="Enter Room Code (e.g. 7842)"
-                    value={inputRoomCode}
-                    maxLength={6}
-                    onChange={(e) => setInputRoomCode(e.target.value)}
-                    className="room-code-input"
-                  />
-                  <button className="join-room-btn" onClick={handleJoinRoom}>
-                    Join Game (Player 2)
+              {onlineStatus === 'joining' && (
+                <div className="room-lobby" role="status" aria-live="polite">
+                  <p className="room-lobby-label">Joining room {roomCode}</p>
+                  <p className="room-subtext">
+                    {peerConnected
+                      ? 'Connected. Waiting for the host to start…'
+                      : 'Looking for the host…'}
+                  </p>
+                  <button type="button" className="host-room-btn" onClick={handleCancelOnline}>
+                    Leave lobby
                   </button>
                 </div>
-              </div>
+              )}
+
+              {(onlineStatus === 'idle' || onlineStatus === 'error') && (
+                <div className="room-actions">
+                  <button type="button" className="host-room-btn" onClick={handleHostRoom}>
+                    <FaUsers /> Host New Game (Player 1)
+                  </button>
+
+                  <form
+                    className="join-room-group"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      handleJoinRoom()
+                    }}
+                  >
+                    <label className="sr-only" htmlFor="room-code-input">Room code</label>
+                    <input
+                      id="room-code-input"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="6-digit room code"
+                      value={inputRoomCode}
+                      maxLength={6}
+                      onChange={(e) => setInputRoomCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="room-code-input"
+                      aria-invalid={onlineStatus === 'error'}
+                    />
+                    <button type="submit" className="join-room-btn">
+                      Join Game (Player 2)
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {onlineError && (
+                <p className="room-error" role="alert">{onlineError}</p>
+              )}
             </div>
           )}
 
@@ -1439,9 +1802,11 @@ const closeCardPreview = () => {
             <h3><FaInfoCircle /> Battle Rules & Controls</h3>
             <ul>
               <li><strong>Randomized Hero Pictures:</strong> Every match generates fresh random hero portraits selected directly from your site work gallery!</li>
-              <li><strong>Hearthstone Heroes:</strong> Authentic ornate hero portraits with Hero Power abilities & crystal mana!</li>
-              <li><strong>Drag & Attack:</strong> Drag a ready unit on your board directly onto an enemy unit or Hero to strike!</li>
-              <li><strong>Drag & Play:</strong> Drag a card from your hand onto the battlefield to summon/cast it!</li>
+              <li><strong>Random Heroes:</strong> Authentic ornate hero portraits with Hero Power abilities & crystal mana!</li>
+              <li><strong>Tap or Drag to Attack:</strong> On a phone, tap a ready unit on your board then tap an enemy unit or Hero to strike. On desktop you can also drag it onto the target!</li>
+              <li><strong>Tap or Drag to Play:</strong> Tap a card in your hand to summon/cast it, or drag it onto the battlefield with a mouse!</li>
+              <li><strong>AI Difficulty:</strong> Single Player offers Easy, Medium and Hard Sentinels — Easy holds back attacks, Hard spends every crystal, trades smartly and uses its Hero Power.</li>
+              <li><strong>Portfolio Deck:</strong> Every artwork from the Work, More Work and Surreal galleries is a playable card — {CARD_POOL.length} unique cards in each deck!</li>
             </ul>
           </div>
 
@@ -1545,13 +1910,22 @@ const closeCardPreview = () => {
               {playMode === 'local_2p' && <span><FaUserFriends /> Mode: Local 2-Player (Pass & Play)</span>}
               {playMode === 'online_2p' && (
                 <span className="online-badge">
-                  <FaGlobe /> Room Code: <strong>{roomCode}</strong> ({myRole === 'p1' ? 'Host / Player 1' : 'Guest / Player 2'})
-                  {peerConnected ? <span className="status-pill connected">🟢 Connected</span> : <span className="status-pill waiting">🟡 Waiting for tab 2...</span>}
+                  <FaGlobe /> Room <strong>{roomCode}</strong> · {myRole === 'p1' ? 'Host / P1' : 'Guest / P2'}
+                  {peerConnected
+                    ? <span className="status-pill connected">Connected</span>
+                    : <span className="status-pill waiting">Opponent disconnected</span>}
+                  {isMyTurn
+                    ? <span className="status-pill connected">Your turn</span>
+                    : <span className="status-pill waiting">Opponent turn</span>}
                 </span>
               )}
             </div>
 
             <div className="arena-top-actions">
+              <button className="toggle-sfx-btn arena-exit-btn" onClick={() => setGameMode('menu')} title="Leave the match and return to the game menu">
+                <FaSignOutAlt /> Exit
+              </button>
+
               <button className={`toggle-sfx-btn ${musicEnabled ? 'active-music' : ''}`} onClick={() => setMusicEnabled(!musicEnabled)} title="Toggle Chill Background Music">
                 <FaMusic /> {musicEnabled ? 'Chill Music ON' : 'Chill Music OFF'}
               </button>
@@ -1563,6 +1937,12 @@ const closeCardPreview = () => {
               <button className="toggle-sfx-btn" onClick={() => setSfxEnabled(!sfxEnabled)} title="Toggle Sound Effects">
                 {sfxEnabled ? <FaVolumeUp /> : <FaVolumeMute />} {sfxEnabled ? 'SFX ON' : 'SFX OFF'}
               </button>
+
+              {playMode === 'single' && (
+                <span className={`difficulty-badge ${difficulty}`} title={`AI difficulty: ${DIFFICULTIES[difficulty].title}`}>
+                  AI · {DIFFICULTIES[difficulty].label}
+                </span>
+              )}
 
               {playMode === 'local_2p' && (
                 <button className="toggle-hand-btn" onClick={() => setHideHand(!hideHand)}>
@@ -1584,7 +1964,7 @@ const closeCardPreview = () => {
             <div 
               className={`hs-hero-frame ${selectedAttacker || (dragState && dragState.type === 'attack') ? 'targetable-hero-glow' : ''}`}
               onClick={() => handleAttackOpponentHero(oppPlayerTag)}
-              title={`Drag unit or click to attack ${oppHeroTitle}!`}
+              title={`Tap to attack ${oppHeroTitle}!`}
             >
               <div className="hs-hero-img-wrapper">
                 <img src={oppHeroImg} alt={oppHeroTitle} className="hs-hero-img" />
@@ -1676,7 +2056,7 @@ const closeCardPreview = () => {
 
           {/* YOUR BOARD */}
           <div className="board-row player-board-row">
-            <div className="board-label">Your Battlefield ({myBoard.length}) - Drag ready units to attack!</div>
+            <div className="board-label">Your Battlefield ({myBoard.length}) - Tap a ready unit, then tap a target to attack!</div>
             <div className="board-cards-container">
               {myBoard.length > 0 ? (
                 myBoard.map(unit => {
@@ -1691,8 +2071,7 @@ const closeCardPreview = () => {
                       data-unit-id={unit.instanceId}
                       data-owner={myPlayerTag}
                       className={`board-unit-card player-unit ${unit.readyToAttack ? 'ready drag-targetable' : 'exhausted'} ${isSelected ? 'selected' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-up' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
-                      onMouseDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
-                      onTouchStart={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
+                      onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
                       onClick={() => handleSelectAttacker(unit, myPlayerTag)}
                     >
                       {floatingDmg.filter(p => p.targetId === unit.instanceId).map(p => (
@@ -1700,7 +2079,7 @@ const closeCardPreview = () => {
                       ))}
 
                       {unit.hasTaunt && <span className="taunt-badge">🛡️ Taunt</span>}
-                      {unit.readyToAttack && <span className="ready-indicator">✨ Ready (Drag to Attack)</span>}
+                      {unit.readyToAttack && <span className="ready-indicator">✨ Ready</span>}
                       <img src={unit.card.src} alt={unit.card.name} />
                       <div className="unit-name">{unit.card.name}</div>
                       <div className="unit-stats">
@@ -1711,7 +2090,7 @@ const closeCardPreview = () => {
                   )
                 })
               ) : (
-                <div className="empty-board-slot">Your Battlefield is empty. Drag cards from hand to play!</div>
+                <div className="empty-board-slot">Your Battlefield is empty. Tap cards in your hand to play them!</div>
               )}
             </div>
           </div>
@@ -1760,7 +2139,7 @@ const closeCardPreview = () => {
           {/* YOUR HAND CARDS */}
           <div className="player-hand-section">
             <div className="hand-title">
-              Your Hand ({myHand.length}) {hideHand ? '- [HIDDEN FOR PASS & PLAY]' : '- Drag a card onto the board to play it!'}
+              Your Hand ({myHand.length}) {hideHand ? '- [HIDDEN FOR PASS & PLAY]' : '- Tap a card to play it!'}
             </div>
 
             {hideHand ? (
@@ -1779,11 +2158,17 @@ const closeCardPreview = () => {
 
                   return (
                     <div 
-  key={card.instanceId} 
-  className={`hand-card ${rarityClass} ${canAfford ? 'can-afford' : 'cannot-afford'}`}
-  onTouchStart={(e) => canAfford && handleStartDragHandCard(e, card)}
-  onClick={() => handleCardPreview(card)}
->
+                      key={card.instanceId} 
+                      className={`hand-card ${rarityClass} ${canAfford ? 'playable hs-glow draggable-hand-card' : 'unplayable'}`}
+                      onPointerDown={(e) => canAfford && handleStartDragHandCard(e, card)}
+                      onClick={() => {
+                        if (suppressClickRef.current) {
+                          suppressClickRef.current = false
+                          return
+                        }
+                        if (canAfford) handlePlayCard(card)
+                      }}
+                    >
                       <div className="hand-card-top">
                         <span className="hand-card-cost">{card.cost}</span>
                         <span className="hand-card-name">{card.name}</span>
@@ -1808,102 +2193,6 @@ const closeCardPreview = () => {
           </div>
         </div>
       )}
-      {/* ========================================================================= */}
-{/* CARD PREVIEW                                                             */}
-{/* ========================================================================= */}
-
-{selectedCard && (
-  <div 
-    className="card-preview-overlay"
-    onClick={closeCardPreview}
-  >
-    <div 
-      className={`card-preview-modal rarity-${(selectedCard.rarity || 'common').toLowerCase()}`}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Close button */}
-      <button 
-        className="card-preview-close"
-        onClick={closeCardPreview}
-        aria-label="Close card preview"
-      >
-        ×
-      </button>
-
-      {/* Card */}
-      <div className="card-preview-card">
-
-        <div className="card-preview-top">
-          <span className="card-preview-cost">
-            {selectedCard.cost}
-          </span>
-
-          <span className="card-preview-name">
-            {selectedCard.name}
-          </span>
-        </div>
-
-        <div className="card-preview-art">
-          <img 
-            src={selectedCard.src} 
-            alt={selectedCard.name} 
-          />
-
-          <span className="card-preview-type">
-            {selectedCard.type}
-          </span>
-        </div>
-
-        <div className="card-preview-description">
-          {selectedCard.ability || 'No special ability.'}
-        </div>
-
-        <div className="card-preview-bottom">
-          {selectedCard.attack > 0 && (
-            <span className="card-preview-stat attack">
-              <FaBolt /> {selectedCard.attack}
-            </span>
-          )}
-
-          {selectedCard.health > 0 && (
-            <span className="card-preview-stat health">
-              <FaShieldAlt /> {selectedCard.health}
-            </span>
-          )}
-        </div>
-
-      </div>
-
-      {/* Play button */}
-      {(() => {
-        const canAffordPreview = myMana >= selectedCard.cost && isMyTurn
-
-        return (
-          <button
-            className={`card-preview-play-btn ${!canAffordPreview ? 'disabled' : ''}`}
-            disabled={!canAffordPreview}
-            onClick={() => {
-              if (!canAffordPreview) return
-
-              handlePlayCard(selectedCard)
-              closeCardPreview()
-            }}
-          >
-            {canAffordPreview 
-              ? `Play Card — ${selectedCard.cost} Mana`
-              : `Need ${selectedCard.cost} Mana`
-            }
-          </button>
-        )
-      })()}
-
-      <p className="card-preview-hint">
-        Click outside to close
-      </p>
-
-    </div>
-  </div>
-)}
 
       {/* ========================================================================= */}
       {/* PASS & PLAY TURN TRANSITION OVERLAY                                       */}
