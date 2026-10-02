@@ -37,6 +37,52 @@ import {
   FaStar
 } from 'react-icons/fa'
 
+// Deck = the hand-authored Converging Reality cards plus every artwork in the
+// Work, More Work and Surreal galleries (see data/galleryCards.js).
+const CARD_POOL = [...cardsData, ...galleryCards]
+
+// Monotonic ids so no two card copies can ever collide (Date.now()+random did,
+// which surfaced as duplicate React keys once the pool grew past 90 cards).
+let cardUid = 0
+const nextCardUid = () => `c${++cardUid}`
+
+// Single-player AI presets. Easy only swings with units it already had and
+// sometimes skips its deploy; Hard curves out all of its mana, picks favourable
+// trades and finishes with its Hero Power.
+const DIFFICULTIES = {
+  easy: {
+    label: 'Easy',
+    title: 'Rookie Sentinel',
+    icon: FaStar,
+    desc: 'Deploys slowly, attacks with part of its board',
+    deployChance: 0.6,
+    attackRatio: 0.5,
+    summoningSickness: true,
+    heroPower: false
+  },
+  medium: {
+    label: 'Medium',
+    title: 'Veteran Sentinel',
+    icon: FaRobot,
+    desc: 'Deploys every turn and swings with everything',
+    deployChance: 1,
+    attackRatio: 1,
+    summoningSickness: false,
+    heroPower: false
+  },
+  hard: {
+    label: 'Hard',
+    title: 'Overlord Sentinel',
+    icon: FaSkull,
+    desc: 'Spends all mana, trades smartly, goes for lethal',
+    deployChance: 1,
+    attackRatio: 1,
+    summoningSickness: false,
+    heroPower: true,
+    maxDeploys: 3
+  }
+}
+
 // Verified artwork images from your site portfolio (public folder & Surreal gallery)
 const heroImagePool = [
   'acd.png', 'ace.png', 'acf.png', 'acg.png', 'aci.png', 'acj.png', 'acx.png', 'acz.png',
