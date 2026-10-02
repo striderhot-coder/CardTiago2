@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { cardsData } from '../data/universeData'
+import { galleryCards } from '../data/galleryCards'
 import { projectsData } from '../data/projectsData'
 import { 
   FaGamepad, 
@@ -31,8 +32,55 @@ import {
   FaVolumeMute,
   FaCrosshairs,
   FaRandom,
-  FaMusic
+  FaMusic,
+  FaStar
 } from 'react-icons/fa'
+
+// Deck = the hand-authored Converging Reality cards plus every artwork in the
+// Work, More Work and Surreal galleries (see data/galleryCards.js).
+const CARD_POOL = [...cardsData, ...galleryCards]
+
+// Monotonic ids so no two card copies can ever collide (Date.now()+random did,
+// which surfaced as duplicate React keys once the pool grew past 90 cards).
+let cardUid = 0
+const nextCardUid = () => `c${++cardUid}`
+
+// Single-player AI presets. Easy only swings with units it already had and
+// sometimes skips its deploy; Hard curves out all of its mana, picks favourable
+// trades and finishes with its Hero Power.
+const DIFFICULTIES = {
+  easy: {
+    label: 'Easy',
+    title: 'Rookie Sentinel',
+    icon: FaStar,
+    desc: 'Deploys slowly, attacks with part of its board',
+    deployChance: 0.6,
+    attackRatio: 0.5,
+    summoningSickness: true,
+    heroPower: false
+  },
+  medium: {
+    label: 'Medium',
+    title: 'Veteran Sentinel',
+    icon: FaRobot,
+    desc: 'Deploys every turn and swings with everything',
+    deployChance: 1,
+    attackRatio: 1,
+    summoningSickness: false,
+    heroPower: false
+  },
+  hard: {
+    label: 'Hard',
+    title: 'Overlord Sentinel',
+    icon: FaSkull,
+    desc: 'Spends all mana, trades smartly, goes for lethal',
+    deployChance: 1,
+    attackRatio: 1,
+    summoningSickness: false,
+    heroPower: true,
+    maxDeploys: 3
+  }
+}
 
 // Verified artwork images from your site portfolio (public folder & Surreal gallery)
 const heroImagePool = [
@@ -361,6 +409,9 @@ const CardGame = () => {
   
   // Play Mode: 'single' (vs AI) | 'local_2p' (Pass & Play) | 'online_2p' (P2P Tab Sync)
   const [playMode, setPlayMode] = useState('single')
+
+  // AI difficulty for Single Player: 'easy' | 'medium' | 'hard'
+  const [difficulty, setDifficulty] = useState('medium')
   
   // Multiplayer Role: 'p1' | 'p2'
   const [myRole, setMyRole] = useState('p1')
@@ -398,6 +449,20 @@ const CardGame = () => {
   // Decks & Hands
   const [p1Deck, setP1Deck] = useState([])
   const [p2Deck, setP2Deck] = useState([])
+
+  // Live mirror of the decks: the AI's chained timeouts capture stale state, so
+  // draws read/write these refs to avoid handing the same card out twice.
+  const p1DeckRef = useRef([])
+  const p2DeckRef = useRef([])
+  const commitDeck = (player, next) => {
+    if (player === 'p1') {
+      p1DeckRef.current = next
+      setP1Deck(next)
+    } else {
+      p2DeckRef.current = next
+      setP2Deck(next)
+    }
+  }
   
   const [p1Hand, setP1Hand] = useState([])
   const [p2Hand, setP2Hand] = useState([])
@@ -405,6 +470,15 @@ const CardGame = () => {
   // Boards
   const [p1Board, setP1Board] = useState([])
   const [p2Board, setP2Board] = useState([])
+
+  // Live mirrors so the AI can read both boards and the player's HP without
+  // side effects in a state updater (StrictMode would run them twice).
+  const p2BoardRef = useRef([])
+  useEffect(() => { p2BoardRef.current = p2Board }, [p2Board])
+  const p1BoardRef = useRef([])
+  useEffect(() => { p1BoardRef.current = p1Board }, [p1Board])
+  const p1HpRef = useRef(30)
+  useEffect(() => { p1HpRef.current = p1Hp }, [p1Hp])
   
   // Combat selection (click fallback & drag)
   const [selectedAttacker, setSelectedAttacker] = useState(null)
@@ -415,6 +489,10 @@ const CardGame = () => {
   // Drag-and-Drop Targeting Arrow & Floating Card State
   const [dragState, setDragState] = useState(null)
   const arenaRef = useRef(null)
+  // Touch drags start as "pending" and only become real drags once the finger
+  // moves past a threshold, so a tap still opens the zoomed card preview.
+  const pendingDragRef = useRef(null)
+  const suppressClickRef = useRef(false)
 
   // Turn state: 'p1' | 'p2'
   const [turn, setTurn] = useState('p1')
@@ -495,10 +573,9 @@ const CardGame = () => {
 
   // Create randomized deck
   const createDeck = () => {
-    const fullPool = [...cardsData, ...cardsData, ...cardsData]
-    return fullPool.sort(() => Math.random() - 0.5).map((card, idx) => ({
+    return [...CARD_POOL].sort(() => Math.random() - 0.5).map(card => ({
       ...card,
-      instanceId: `${card.id}-${idx}-${Date.now()}-${Math.floor(Math.random()*10000)}`
+      instanceId: `${card.id}-${nextCardUid()}`
     }))
   }
 
@@ -569,8 +646,8 @@ const CardGame = () => {
         if (data.p2MaxMana !== undefined) setP2MaxMana(data.p2MaxMana)
         if (data.p1Hand) setP1Hand(data.p1Hand)
         if (data.p2Hand) setP2Hand(data.p2Hand)
-        if (data.p1Deck) setP1Deck(data.p1Deck)
-        if (data.p2Deck) setP2Deck(data.p2Deck)
+        if (data.p1Deck) commitDeck('p1', data.p1Deck)
+        if (data.p2Deck) commitDeck('p2', data.p2Deck)
         if (data.p1Board) setP1Board(data.p1Board)
         if (data.p2Board) setP2Board(data.p2Board)
         if (data.p1HeroImg) setP1HeroImg(data.p1HeroImg)
@@ -609,18 +686,46 @@ const CardGame = () => {
     }
   }, [playMode, roomCode, myRole, p1Hp, p2Hp, p1Mana, p1MaxMana, p2Mana, p2MaxMana, p1Hand, p2Hand, p1Deck, p2Deck, p1Board, p2Board, p1HeroImg, p2HeroImg, turn, turnCount, logs, winner, gameMode])
 
-  // Global Mouse Move & Mouse Up Listener for Drag-and-Drop Targeting
+  // Global Pointer Move & Up Listener for Drag-and-Drop Targeting
   useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!dragState || !dragState.isDragging) return
-      setDragState(prev => ({
-        ...prev,
-        currentX: e.clientX,
-        currentY: e.clientY
-      }))
+    const beginDrag = (pending, x, y) => {
+      const rect = pending.el.getBoundingClientRect()
+      setDragState({
+        isDragging: true,
+        type: pending.type,
+        item: pending.item,
+        startX: rect.left + rect.width / 2,
+        startY: rect.top + rect.height / 2,
+        currentX: x,
+        currentY: y
+      })
+      playSFX('draw', sfxEnabled)
     }
 
-    const handleMouseUp = (e) => {
+    const handlePointerMove = (e) => {
+      const pending = pendingDragRef.current
+      if (pending) {
+        const dx = e.clientX - pending.originX
+        const dy = e.clientY - pending.originY
+        // Any real upward movement means drag-to-play; a flat sideways swipe
+        // stays with the scrolling hand row (the card declares touch-action: pan-x).
+        const moved = pending.axis === 'vertical'
+          ? Math.abs(dy) > 10
+          : Math.abs(dx) > 10 || Math.abs(dy) > 10
+        if (moved) {
+          pendingDragRef.current = null
+          suppressClickRef.current = true
+          beginDrag(pending, e.clientX, e.clientY)
+        }
+        return
+      }
+
+      if (!dragState || !dragState.isDragging) return
+      setDragState(prev => ({ ...prev, currentX: e.clientX, currentY: e.clientY }))
+    }
+
+    const handlePointerUp = (e) => {
+      pendingDragRef.current = null
       if (!dragState || !dragState.isDragging) return
 
       const elem = document.elementFromPoint(e.clientX, e.clientY)
@@ -653,22 +758,19 @@ const CardGame = () => {
       setDragState(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 0 && dragState) {
-        handleMouseMove(e.touches[0])
-      }
-    })
-    window.addEventListener('touchend', (e) => {
-      if (e.changedTouches.length > 0 && dragState) {
-        handleMouseUp(e.changedTouches[0])
-      }
-    })
+    const handlePointerCancel = () => {
+      pendingDragRef.current = null
+      setDragState(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerCancel)
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerCancel)
     }
   }, [dragState, turn, p1Board, p2Board])
 
@@ -676,13 +778,21 @@ const CardGame = () => {
   const handleStartDragAttacker = (e, unit, ownerPlayer) => {
     if (playMode === 'online_2p' && turn !== myRole) return
     if (ownerPlayer !== turn || !unit.readyToAttack) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    e.preventDefault()
+    suppressClickRef.current = false
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
 
     setSelectedAttacker(unit)
+
+    if (e.pointerType === 'touch') {
+      pendingDragRef.current = { type: 'attack', item: unit, el: e.currentTarget, originX: e.clientX, originY: e.clientY, axis: 'any' }
+      return
+    }
+
+    e.preventDefault()
     setDragState({
       isDragging: true,
       type: 'attack',
@@ -701,12 +811,21 @@ const CardGame = () => {
     if (playMode === 'online_2p' && turn !== myRole) return
     const currentMana = isP1 ? p1Mana : p2Mana
     if (currentMana < card.cost) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    e.preventDefault()
+    suppressClickRef.current = false
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
 
+    // Touch waits for a real move so a tap opens the zoomed preview and a
+    // sideways swipe still scrolls the hand row.
+    if (e.pointerType === 'touch') {
+      pendingDragRef.current = { type: 'play', item: card, el: e.currentTarget, originX: e.clientX, originY: e.clientY, axis: 'vertical' }
+      return
+    }
+
+    e.preventDefault()
     setDragState({
       isDragging: true,
       type: 'play',
@@ -719,16 +838,23 @@ const CardGame = () => {
     playSFX('draw', sfxEnabled)
   }
 
-  // Open card preview
-const handleCardPreview = (card) => {
-  setSelectedCard(card)
-  playSFX('draw', sfxEnabled)
-}
+  // Open the Hearthstone-style zoomed card view
+  const handleCardPreview = (card) => {
+    setSelectedCard(card)
+    playSFX('draw', sfxEnabled)
+  }
 
-// Close card preview
-const closeCardPreview = () => {
-  setSelectedCard(null)
-}
+  const closeCardPreview = () => {
+    setSelectedCard(null)
+  }
+
+  // Esc closes the zoomed card
+  useEffect(() => {
+    if (!selectedCard) return
+    const onKey = (e) => { if (e.key === 'Escape') closeCardPreview() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedCard])
 
   // Start Game initialization
   const handleStartGame = (overrideMode = playMode, overrideRole = myRole) => {
@@ -823,31 +949,32 @@ const closeCardPreview = () => {
   // Draw card for player
   const drawCard = (targetPlayer, count = 1) => {
     playSFX('draw', sfxEnabled)
-    if (targetPlayer === 'p1') {
-      if (p1Deck.length === 0) {
-        addLog('⚠️ Player 1 deck is empty! 2 fatigue damage.')
+    const deck = targetPlayer === 'p1' ? p1DeckRef.current : p2DeckRef.current
+
+    if (deck.length === 0) {
+      const label = targetPlayer === 'p1' ? 'Player 1' : 'Player 2'
+      addLog(`⚠️ ${label} deck is empty! 2 fatigue damage.`)
+      if (targetPlayer === 'p1') {
         setP1Hp(prev => Math.max(0, prev - 2))
         triggerFloatingDmg('hero-p1', '-2 Fatigue', 'dmg')
-        return
-      }
-      const drawn = p1Deck.slice(0, count)
-      const remaining = p1Deck.slice(count)
-      setP1Hand(prev => [...prev, ...drawn])
-      setP1Deck(remaining)
-      addLog(`🎴 Player 1 drew ${drawn.map(c => c.name).join(', ')}.`)
-    } else {
-      if (p2Deck.length === 0) {
-        addLog('⚠️ Player 2 deck is empty! 2 fatigue damage.')
+      } else {
         setP2Hp(prev => Math.max(0, prev - 2))
         triggerFloatingDmg('hero-p2', '-2 Fatigue', 'dmg')
-        return
       }
-      const drawn = p2Deck.slice(0, count)
-      const remaining = p2Deck.slice(count)
-      setP2Hand(prev => [...prev, ...drawn])
-      setP2Deck(remaining)
-      addLog(`🎴 Player 2 drew ${drawn.map(c => c.name).join(', ')}.`)
+      return
     }
+
+    // Fresh ids per drawn copy keep hand keys unique even if a chained timeout
+    // fires the same draw twice.
+    const drawn = deck.slice(0, count).map(c => ({ ...c, instanceId: `${c.id}-${nextCardUid()}` }))
+    commitDeck(targetPlayer, deck.slice(count))
+
+    if (targetPlayer === 'p1') {
+      setP1Hand(prev => [...prev, ...drawn])
+    } else {
+      setP2Hand(prev => [...prev, ...drawn])
+    }
+    addLog(`🎴 ${targetPlayer === 'p1' ? 'Player 1' : 'Player 2'} drew ${drawn.map(c => c.name).join(', ')}.`)
   }
 
   // Use Hero Power
@@ -1691,9 +1818,11 @@ const closeCardPreview = () => {
                       data-unit-id={unit.instanceId}
                       data-owner={myPlayerTag}
                       className={`board-unit-card player-unit ${unit.readyToAttack ? 'ready drag-targetable' : 'exhausted'} ${isSelected ? 'selected' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-up' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
-                      onMouseDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
-                      onTouchStart={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
-                      onClick={() => handleSelectAttacker(unit, myPlayerTag)}
+                      onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
+                      onClick={() => {
+                        if (suppressClickRef.current) { suppressClickRef.current = false; return }
+                        handleSelectAttacker(unit, myPlayerTag)
+                      }}
                     >
                       {floatingDmg.filter(p => p.targetId === unit.instanceId).map(p => (
                         <div key={p.id} className={`floating-dmg-popup ${p.type}`}>{p.text}</div>
@@ -1779,11 +1908,14 @@ const closeCardPreview = () => {
 
                   return (
                     <div 
-  key={card.instanceId} 
-  className={`hand-card ${rarityClass} ${canAfford ? 'can-afford' : 'cannot-afford'}`}
-  onTouchStart={(e) => canAfford && handleStartDragHandCard(e, card)}
-  onClick={() => handleCardPreview(card)}
->
+                      key={card.instanceId} 
+                      className={`hand-card draggable-hand-card ${rarityClass} ${canAfford ? 'can-afford' : 'cannot-afford'}`}
+                      onPointerDown={(e) => canAfford && handleStartDragHandCard(e, card)}
+                      onClick={() => {
+                        if (suppressClickRef.current) { suppressClickRef.current = false; return }
+                        handleCardPreview(card)
+                      }}
+                    >
                       <div className="hand-card-top">
                         <span className="hand-card-cost">{card.cost}</span>
                         <span className="hand-card-name">{card.name}</span>
