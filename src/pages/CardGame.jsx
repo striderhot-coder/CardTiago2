@@ -2,6 +2,10 @@ import { supabase, isSupabaseConfigured } from '../supabaseClient'
 import React, { useState, useEffect, useRef } from 'react'
 import { cardsData } from '../data/universeData'
 import { galleryCards } from '../data/galleryCards'
+<<<<<<< HEAD
+=======
+import { projectsData } from '../data/projectsData'
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
 import { 
   FaGamepad, 
   FaShieldAlt, 
@@ -33,7 +37,10 @@ import {
   FaCrosshairs,
   FaRandom,
   FaMusic,
+<<<<<<< HEAD
   FaSignOutAlt,
+=======
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
   FaStar
 } from 'react-icons/fa'
 
@@ -479,12 +486,19 @@ const CardGame = () => {
   const [p1Board, setP1Board] = useState([])
   const [p2Board, setP2Board] = useState([])
 
+<<<<<<< HEAD
   // Live mirror so the AI can read its own board without side effects in an updater
   const p2BoardRef = useRef([])
   useEffect(() => { p2BoardRef.current = p2Board }, [p2Board])
 
   // The AI sequences several attacks per turn, so it also needs live views of
   // the player's board and HP (state values would be stale between timeouts).
+=======
+  // Live mirrors so the AI can read both boards and the player's HP without
+  // side effects in a state updater (StrictMode would run them twice).
+  const p2BoardRef = useRef([])
+  useEffect(() => { p2BoardRef.current = p2Board }, [p2Board])
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
   const p1BoardRef = useRef([])
   useEffect(() => { p1BoardRef.current = p1Board }, [p1Board])
   const p1HpRef = useRef(30)
@@ -496,6 +510,10 @@ const CardGame = () => {
   // Drag-and-Drop Targeting Arrow & Floating Card State
   const [dragState, setDragState] = useState(null)
   const arenaRef = useRef(null)
+  // Touch drags start as "pending" and only become real drags once the finger
+  // moves past a threshold, so a tap still opens the zoomed card preview.
+  const pendingDragRef = useRef(null)
+  const suppressClickRef = useRef(false)
 
   // Touch drags start as "pending" and only become real drags once the finger
   // moves past a threshold, so a sideways swipe still scrolls the hand row.
@@ -764,6 +782,36 @@ const CardGame = () => {
         if (myRole === 'p1' && gameModeRef.current === 'playing') {
           queueSync()
         }
+<<<<<<< HEAD
+=======
+      } else if (data.type === 'GAME_START_SYNC' || data.type === 'STATE_UPDATE') {
+        if (data.p1Hp !== undefined) setP1Hp(data.p1Hp)
+        if (data.p2Hp !== undefined) setP2Hp(data.p2Hp)
+        if (data.p1Mana !== undefined) setP1Mana(data.p1Mana)
+        if (data.p1MaxMana !== undefined) setP1MaxMana(data.p1MaxMana)
+        if (data.p2Mana !== undefined) setP2Mana(data.p2Mana)
+        if (data.p2MaxMana !== undefined) setP2MaxMana(data.p2MaxMana)
+        if (data.p1Hand) setP1Hand(data.p1Hand)
+        if (data.p2Hand) setP2Hand(data.p2Hand)
+        if (data.p1Deck) commitDeck('p1', data.p1Deck)
+        if (data.p2Deck) commitDeck('p2', data.p2Deck)
+        if (data.p1Board) setP1Board(data.p1Board)
+        if (data.p2Board) setP2Board(data.p2Board)
+        if (data.p1HeroImg) setP1HeroImg(data.p1HeroImg)
+        if (data.p2HeroImg) setP2HeroImg(data.p2HeroImg)
+        if (data.p1HeroName) setP1HeroName(data.p1HeroName)
+        if (data.p2HeroName) setP2HeroName(data.p2HeroName)
+        if (data.turn && data.turn !== turn) {
+          setTurn(data.turn)
+          triggerTurnBanner(data.turn === 'p1' ? 'PLAYER 1 TURN' : 'PLAYER 2 TURN', data.turn)
+        }
+        if (data.turnCount) setTurnCount(data.turnCount)
+        if (data.logs) setLogs(data.logs)
+        if (data.gameMode) setGameMode(data.gameMode)
+        if (data.winner !== undefined) setWinner(data.winner)
+        setPeerConnected(true)
+        setOnlineStatus('connected')
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
       }
     }
 
@@ -808,6 +856,7 @@ const CardGame = () => {
     }
   }, [playMode, roomCode, myRole])
 
+<<<<<<< HEAD
   useEffect(() => {
     if (playMode !== 'online_2p' || myRole !== 'p1' || !peerConnected) return
     if (gameMode === 'menu' && !startedOnlineRef.current) {
@@ -827,16 +876,28 @@ const CardGame = () => {
       const rect = pending.el?.getBoundingClientRect?.()
       const startX = rect ? rect.left + rect.width / 2 : x
       const startY = rect ? rect.top + rect.height / 2 : y
+=======
+  // Global Pointer Move & Up Listener for Drag-and-Drop Targeting
+  useEffect(() => {
+    const beginDrag = (pending, x, y) => {
+      const rect = pending.el.getBoundingClientRect()
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
       setDragState({
         isDragging: true,
         type: pending.type,
         item: pending.item,
+<<<<<<< HEAD
         startX,
         startY,
+=======
+        startX: rect.left + rect.width / 2,
+        startY: rect.top + rect.height / 2,
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
         currentX: x,
         currentY: y
       })
       playSFX('draw', sfxEnabled)
+<<<<<<< HEAD
     }
 
     const handlePointerMove = (e) => {
@@ -865,6 +926,32 @@ const CardGame = () => {
       }))
     }
 
+=======
+    }
+
+    const handlePointerMove = (e) => {
+      const pending = pendingDragRef.current
+      if (pending) {
+        const dx = e.clientX - pending.originX
+        const dy = e.clientY - pending.originY
+        // Any real upward movement means drag-to-play; a flat sideways swipe
+        // stays with the scrolling hand row (the card declares touch-action: pan-x).
+        const moved = pending.axis === 'vertical'
+          ? Math.abs(dy) > 10
+          : Math.abs(dx) > 10 || Math.abs(dy) > 10
+        if (moved) {
+          pendingDragRef.current = null
+          suppressClickRef.current = true
+          beginDrag(pending, e.clientX, e.clientY)
+        }
+        return
+      }
+
+      if (!dragState || !dragState.isDragging) return
+      setDragState(prev => ({ ...prev, currentX: e.clientX, currentY: e.clientY }))
+    }
+
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
     const handlePointerUp = (e) => {
       pendingDragRef.current = null
       if (!dragState || !dragState.isDragging) return
@@ -921,12 +1008,27 @@ const CardGame = () => {
     if (ownerPlayer !== turn || !unit.readyToAttack) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
 
+<<<<<<< HEAD
+=======
+    suppressClickRef.current = false
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
 
+<<<<<<< HEAD
     // Selection is owned by the click/tap handler so a plain tap selects
     // instead of being toggled straight back off.
+=======
+    setSelectedAttacker(unit)
+
+    if (e.pointerType === 'touch') {
+      pendingDragRef.current = { type: 'attack', item: unit, el: e.currentTarget, originX: e.clientX, originY: e.clientY, axis: 'any' }
+      return
+    }
+
+    e.preventDefault()
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
     setDragState({
       isDragging: true,
       type: 'attack',
@@ -946,13 +1048,19 @@ const CardGame = () => {
     const currentMana = isP1 ? p1Mana : p2Mana
     if (currentMana < card.cost) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
+<<<<<<< HEAD
 
     suppressClickRef.current = false
 
+=======
+
+    suppressClickRef.current = false
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
     const startY = rect.top + rect.height / 2
 
+<<<<<<< HEAD
     // Touch waits for a real move so a sideways swipe still scrolls the hand
     // row (the card declares `touch-action: pan-x`).
     if (e.pointerType === 'touch') {
@@ -967,6 +1075,16 @@ const CardGame = () => {
       return
     }
 
+=======
+    // Touch waits for a real move so a tap opens the zoomed preview and a
+    // sideways swipe still scrolls the hand row.
+    if (e.pointerType === 'touch') {
+      pendingDragRef.current = { type: 'play', item: card, el: e.currentTarget, originX: e.clientX, originY: e.clientY, axis: 'vertical' }
+      return
+    }
+
+    e.preventDefault()
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
     setDragState({
       isDragging: true,
       type: 'play',
@@ -979,6 +1097,27 @@ const CardGame = () => {
     playSFX('draw', sfxEnabled)
   }
 
+<<<<<<< HEAD
+=======
+  // Open the Hearthstone-style zoomed card view
+  const handleCardPreview = (card) => {
+    setSelectedCard(card)
+    playSFX('draw', sfxEnabled)
+  }
+
+  const closeCardPreview = () => {
+    setSelectedCard(null)
+  }
+
+  // Esc closes the zoomed card
+  useEffect(() => {
+    if (!selectedCard) return
+    const onKey = (e) => { if (e.key === 'Escape') closeCardPreview() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedCard])
+
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
   // Start Game initialization
   const handleStartGame = (overrideMode = playMode, overrideRole = myRole) => {
     const deck1 = createDeck()
@@ -2118,7 +2257,14 @@ const CardGame = () => {
                       data-owner={myPlayerTag}
                       className={`board-unit-card player-unit ${unit.readyToAttack ? 'ready drag-targetable' : 'exhausted'} ${isSelected ? 'selected' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-up' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
                       onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
+<<<<<<< HEAD
                       onClick={() => handleSelectAttacker(unit, myPlayerTag)}
+=======
+                      onClick={() => {
+                        if (suppressClickRef.current) { suppressClickRef.current = false; return }
+                        handleSelectAttacker(unit, myPlayerTag)
+                      }}
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
                     >
                       {floatingDmg.filter(p => p.targetId === unit.instanceId).map(p => (
                         <div key={p.id} className={`floating-dmg-popup ${p.type}`}>{p.text}</div>
@@ -2205,6 +2351,7 @@ const CardGame = () => {
                   return (
                     <div 
                       key={card.instanceId} 
+<<<<<<< HEAD
                       className={`hand-card ${rarityClass} ${canAfford ? 'playable hs-glow draggable-hand-card' : 'unplayable'}`}
                       onPointerDown={(e) => canAfford && handleStartDragHandCard(e, card)}
                       onClick={() => {
@@ -2213,6 +2360,13 @@ const CardGame = () => {
                           return
                         }
                         if (canAfford) handlePlayCard(card)
+=======
+                      className={`hand-card draggable-hand-card ${rarityClass} ${canAfford ? 'can-afford' : 'cannot-afford'}`}
+                      onPointerDown={(e) => canAfford && handleStartDragHandCard(e, card)}
+                      onClick={() => {
+                        if (suppressClickRef.current) { suppressClickRef.current = false; return }
+                        handleCardPreview(card)
+>>>>>>> aeae12ff758565f17878614e94145434dcc436e9
                       }}
                     >
                       <div className="hand-card-top">

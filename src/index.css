@@ -3133,6 +3133,264 @@ h1, h2, h3, h4, h5, h6 {
 .hand-stat.atk { color: #fca5a5; }
 .hand-stat.hp { color: #6ee7b7; }
 
+/* The JSX toggles can-afford / cannot-afford, so those drive the hover lift */
+.hand-card.can-afford:hover {
+  transform: translateY(-12px);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 10px 25px rgba(6, 182, 212, 0.4);
+}
+
+.hand-card.cannot-afford {
+  opacity: 0.55;
+  filter: grayscale(0.35);
+}
+
+/* ==========================================================================
+   HEARTHSTONE-STYLE CARD ZOOM — click a hand card to inspect it full size
+   ========================================================================== */
+.card-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: previewFadeIn 0.18s ease-out;
+}
+
+.card-preview-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  animation: previewZoomIn 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+}
+
+.card-preview-card {
+  position: relative;
+  width: min(320px, 76vw);
+  aspect-ratio: 5 / 7;
+  display: flex;
+  flex-direction: column;
+  padding: 0.9rem;
+  border-radius: 18px;
+  background: linear-gradient(160deg, #1e293b, #0b1220 65%);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 35px rgba(6, 182, 212, 0.18);
+  overflow: hidden;
+}
+
+.card-preview-modal.rarity-rare .card-preview-card {
+  border-color: #06b6d4;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(6, 182, 212, 0.4);
+}
+
+.card-preview-modal.rarity-epic .card-preview-card {
+  border-color: #a855f7;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(168, 85, 247, 0.45);
+}
+
+.card-preview-modal.rarity-legendary .card-preview-card {
+  border-color: #f59e0b;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 45px rgba(245, 158, 11, 0.5);
+}
+
+.card-preview-modal.rarity-mythic .card-preview-card {
+  border-color: #ec4899;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 45px rgba(236, 72, 153, 0.5);
+}
+
+.card-preview-top {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.card-preview-cost {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-family-title);
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #eaf6ff;
+  background: radial-gradient(circle at 30% 25%, #38bdf8, #1d4ed8 70%);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.55);
+}
+
+.card-preview-name {
+  font-family: var(--font-family-title);
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.card-preview-art {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.card-preview-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card-preview-type {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0.25rem;
+  text-align: center;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: rgba(2, 6, 23, 0.82);
+}
+
+.card-preview-description {
+  margin-top: 0.65rem;
+  min-height: 3.2em;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.card-preview-bottom {
+  display: flex;
+  align-items: center;
+  margin-top: 0.35rem;
+}
+
+.card-preview-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.card-preview-stat.attack {
+  margin-right: auto;
+  color: #fca5a5;
+  text-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+}
+
+.card-preview-stat.health {
+  margin-left: auto;
+  color: #6ee7b7;
+  text-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
+}
+
+.card-preview-close {
+  position: absolute;
+  top: -0.7rem;
+  right: -0.7rem;
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(15, 23, 42, 0.96);
+  color: var(--text-primary);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.card-preview-close:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  transform: rotate(90deg);
+}
+
+.card-preview-play-btn {
+  padding: 0.75rem 1.6rem;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: #04121a;
+  background: linear-gradient(135deg, var(--accent-cyan-hover), var(--accent-cyan));
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.45);
+  transition: var(--transition-smooth);
+}
+
+.card-preview-play-btn:hover:not(.disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 0 28px rgba(6, 182, 212, 0.65);
+}
+
+.card-preview-play-btn.disabled {
+  cursor: not-allowed;
+  color: var(--text-secondary);
+  background: rgba(148, 163, 184, 0.18);
+  box-shadow: none;
+}
+
+.card-preview-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: rgba(203, 213, 225, 0.7);
+}
+
+@keyframes previewFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes previewZoomIn {
+  from { opacity: 0; transform: scale(0.72) translateY(24px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@media screen and (max-width: 600px) {
+  .card-preview-card {
+    width: min(74vw, 300px);
+    padding: 0.7rem;
+    border-radius: 14px;
+  }
+
+  .card-preview-cost {
+    width: 38px;
+    height: 38px;
+    font-size: 1.2rem;
+  }
+
+  .card-preview-name { font-size: 1rem; }
+  .card-preview-description { font-size: 0.78rem; min-height: 2.8em; }
+  .card-preview-stat { font-size: 1.1rem; }
+  .card-preview-play-btn { padding: 0.65rem 1.3rem; font-size: 0.88rem; }
+
+  .card-preview-close {
+    top: -0.45rem;
+    right: -0.45rem;
+    width: 34px;
+    height: 34px;
+  }
+}
+
 /* Result Modals */
 .victory-modal, .defeat-modal {
   text-align: center;
