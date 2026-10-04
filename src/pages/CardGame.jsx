@@ -46,6 +46,9 @@ const CARD_POOL = [...cardsData, ...galleryCards]
 let cardUid = 0
 const nextCardUid = () => `c${++cardUid}`
 
+// Every hero starts with a 100 HP pool.
+const HERO_MAX_HP = 100
+
 // Single-player AI presets. Easy only swings with units it already had and
 // sometimes skips its deploy; Hard curves out all of its mana, picks favourable
 // trades and finishes with its Hero Power.
@@ -445,8 +448,8 @@ const CardGame = () => {
   const [showTurnTransition, setShowTurnTransition] = useState(false)
 
   // Health & Mana for P1 & P2
-  const [p1Hp, setP1Hp] = useState(30)
-  const [p2Hp, setP2Hp] = useState(30)
+  const [p1Hp, setP1Hp] = useState(HERO_MAX_HP)
+  const [p2Hp, setP2Hp] = useState(HERO_MAX_HP)
   
   const [p1MaxMana, setP1MaxMana] = useState(1)
   const [p1Mana, setP1Mana] = useState(1)
@@ -487,11 +490,14 @@ const CardGame = () => {
   // the player's board and HP (state values would be stale between timeouts).
   const p1BoardRef = useRef([])
   useEffect(() => { p1BoardRef.current = p1Board }, [p1Board])
-  const p1HpRef = useRef(30)
+  const p1HpRef = useRef(HERO_MAX_HP)
   useEffect(() => { p1HpRef.current = p1Hp }, [p1Hp])
   
   // Combat selection (click fallback & drag)
   const [selectedAttacker, setSelectedAttacker] = useState(null)
+
+  // Card currently shown in the zoomed inspection overlay
+  const [selectedCard, setSelectedCard] = useState(null)
   
   // Drag-and-Drop Targeting Arrow & Floating Card State
   const [dragState, setDragState] = useState(null)
@@ -979,6 +985,23 @@ const CardGame = () => {
     playSFX('draw', sfxEnabled)
   }
 
+  // Hearthstone-style zoom: tap a card to inspect it full size with its stats
+  const handleCardPreview = (card) => {
+    setSelectedCard(card)
+    playSFX('draw', sfxEnabled)
+  }
+
+  const closeCardPreview = () => {
+    setSelectedCard(null)
+  }
+
+  useEffect(() => {
+    if (!selectedCard) return
+    const onKey = (e) => { if (e.key === 'Escape') setSelectedCard(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedCard])
+
   // Start Game initialization
   const handleStartGame = (overrideMode = playMode, overrideRole = myRole) => {
     const deck1 = createDeck()
@@ -993,8 +1016,8 @@ const CardGame = () => {
     // Randomize Hero pictures & names for every new battle
     randomizeHeroes()
 
-    setP1Hp(30)
-    setP2Hp(30)
+    setP1Hp(HERO_MAX_HP)
+    setP2Hp(HERO_MAX_HP)
     setP1MaxMana(1)
     setP1Mana(1)
     setP2MaxMana(1)
@@ -2212,7 +2235,7 @@ const CardGame = () => {
                           suppressClickRef.current = false
                           return
                         }
-                        if (canAfford) handlePlayCard(card)
+                        handleCardPreview(card)
                       }}
                     >
                       <div className="hand-card-top">
@@ -2236,6 +2259,68 @@ const CardGame = () => {
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ZOOMED CARD INSPECTION (Hearthstone-style amplify)                        */}
+      {/* ========================================================================= */}
+      {selectedCard && (
+        <div className="card-preview-overlay" onClick={closeCardPreview}>
+          <div
+            className={`card-preview-modal rarity-${(selectedCard.rarity || 'common').toLowerCase()}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="card-preview-close" onClick={closeCardPreview} aria-label="Close card preview">
+              ×
+            </button>
+
+            <div className="card-preview-card">
+              <div className="card-preview-top">
+                <span className="card-preview-cost">{selectedCard.cost}</span>
+                <span className="card-preview-name">{selectedCard.name}</span>
+              </div>
+
+              <div className="card-preview-art">
+                <img src={selectedCard.src} alt={selectedCard.name} />
+                <span className="card-preview-type">{selectedCard.type}</span>
+              </div>
+
+              <div className="card-preview-description">
+                {selectedCard.ability || 'No special ability.'}
+              </div>
+
+              <div className="card-preview-bottom">
+                {selectedCard.attack > 0 && (
+                  <span className="card-preview-stat attack"><FaBolt /> {selectedCard.attack}</span>
+                )}
+                {selectedCard.health > 0 && (
+                  <span className="card-preview-stat health"><FaShieldAlt /> {selectedCard.health}</span>
+                )}
+              </div>
+            </div>
+
+            {(() => {
+              const canAffordPreview = myMana >= selectedCard.cost && isMyTurn
+              return (
+                <button
+                  className={`card-preview-play-btn ${!canAffordPreview ? 'disabled' : ''}`}
+                  disabled={!canAffordPreview}
+                  onClick={() => {
+                    if (!canAffordPreview) return
+                    handlePlayCard(selectedCard)
+                    closeCardPreview()
+                  }}
+                >
+                  {canAffordPreview
+                    ? `Play Card — ${selectedCard.cost} Mana`
+                    : `Need ${selectedCard.cost} Mana`}
+                </button>
+              )
+            })()}
+
+            <p className="card-preview-hint">Tap outside or press Esc to close</p>
           </div>
         </div>
       )}
