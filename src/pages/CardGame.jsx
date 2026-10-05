@@ -49,6 +49,23 @@ const nextCardUid = () => `c${++cardUid}`
 // Every hero starts with a 100 HP pool.
 const HERO_MAX_HP = 100
 
+// Keywords printed on a card face. Detection mirrors handlePlayCard exactly, so
+// the readout never claims an effect the engine ignores: Realms/Artifacts always
+// enter as forced-taunt defenders, and Rush only applies to Unit/Hero cards.
+const cardKeywords = (card) => {
+  if (!card || card.type === 'Spell') return []
+  const text = (card.ability || '').toLowerCase()
+  const isUnit = card.type === 'Unit' || card.type === 'Hero'
+  const out = []
+  if (!isUnit || text.includes('taunt')) {
+    out.push({ id: 'taunt', label: 'Taunt', rule: 'Enemies must attack this unit first.' })
+  }
+  if (isUnit && text.includes('rush')) {
+    out.push({ id: 'rush', label: 'Rush', rule: 'Can attack the turn it is summoned.' })
+  }
+  return out
+}
+
 // Single-player AI presets. Easy only swings with units it already had and
 // sometimes skips its deploy; Hard curves out all of its mana, picks favourable
 // trades and finishes with its Hero Power.
@@ -60,7 +77,6 @@ const DIFFICULTIES = {
     desc: 'Deploys slowly, attacks with part of its board',
     deployChance: 0.6,
     attackRatio: 0.5,
-    summoningSickness: true,
     heroPower: false
   },
   medium: {
@@ -70,7 +86,6 @@ const DIFFICULTIES = {
     desc: 'Deploys every turn and swings with everything',
     deployChance: 1,
     attackRatio: 1,
-    summoningSickness: false,
     heroPower: false
   },
   hard: {
@@ -80,7 +95,6 @@ const DIFFICULTIES = {
     desc: 'Spends all mana, trades smartly, goes for lethal',
     deployChance: 1,
     attackRatio: 1,
-    summoningSickness: false,
     heroPower: true,
     maxDeploys: 3
   }
@@ -1552,6 +1566,7 @@ const CardGame = () => {
     }
 
     const deploy = (card) => {
+      const isRush = /rush/i.test(card.ability || '')
       const unit = {
         instanceId: `ai-unit-${nextCardUid()}`,
         card,
@@ -1559,7 +1574,7 @@ const CardGame = () => {
         maxHp: card.health,
         attack: card.attack,
         hasTaunt: card.rarity === 'Legendary' || card.rarity === 'Epic' || /taunt/i.test(card.ability || ''),
-        readyToAttack: false,
+        readyToAttack: isRush,
         isJustSummoned: true
       }
       setP2Board(prev => [...prev, unit])
@@ -1567,7 +1582,8 @@ const CardGame = () => {
       addLog(`🤖 ${p2HeroName} deployed ${card.name} (${card.attack}/${card.health})!`)
     }
 
-    // Units already on board when the turn started — Easy only swings with these.
+    // Units already on board when the turn started. Anything deployed this turn
+    // has summoning sickness and can only attack from the AI's next turn.
     const veterans = p2BoardRef.current.map(u => u.instanceId)
 
     after(() => {
@@ -1604,8 +1620,13 @@ const CardGame = () => {
 
       // ---- Attack phase ----
       after(() => {
-        let attackers = p2BoardRef.current.filter(u => u.attack > 0 && u.currentHp > 0)
-        if (cfg.summoningSickness) attackers = attackers.filter(u => veterans.includes(u.instanceId))
+        // Summoning sickness: only units that were already on board swing, plus
+        // any fresh deploy with Rush (same rule the player follows).
+        let attackers = p2BoardRef.current.filter(u =>
+          u.attack > 0 &&
+          u.currentHp > 0 &&
+          (veterans.includes(u.instanceId) || /rush/i.test(u.card?.ability || ''))
+        )
         if (cfg.attackRatio < 1 && attackers.length > 1) {
           attackers = attackers.slice(0, Math.max(1, Math.round(attackers.length * cfg.attackRatio)))
         }
@@ -1705,6 +1726,10 @@ const CardGame = () => {
   const oppHeroImg = isMeP1 ? p2HeroImg : p1HeroImg
 
   const isMyTurn = playMode === 'online_2p' ? turn === myRole : true
+
+  const previewKeywords = cardKeywords(selectedCard)
+  const previewIsSpell = selectedCard?.type === 'Spell'
+  const previewHasRush = previewKeywords.some(k => k.id === 'rush')
 
   return (
     <div className="work-page card-game-page">
@@ -2224,6 +2249,7 @@ const CardGame = () => {
                 {myHand.map(card => {
                   const canAfford = myMana >= card.cost && isMyTurn
                   const rarityClass = `rarity-${card.rarity.toLowerCase()}`
+                  const keywords = cardKeywords(card)
 
                   return (
                     <div 
@@ -2248,7 +2274,16 @@ const CardGame = () => {
                         <span className="hand-card-type">{card.type}</span>
                       </div>
 
-                      <div className="hand-card-ability">{card.ability}</div>
+                      <div className="hand-card-ability">
+                        {keywords.length > 0 && (
+                          <span className="keyword-chips">
+                            {keywords.map(k => (
+                              <span key={k.id} className={`keyword-chip ${k.id}`}>{k.label}</span>
+                            ))}
+                          </span>
+                        )}
+                        {card.ability}
+                      </div>
 
                       <div className="hand-card-bottom">
                         {card.attack > 0 ? <span className="hand-stat atk"><FaBolt /> {card.attack}</span> : <span></span>}
@@ -2287,9 +2322,25 @@ const CardGame = () => {
                 <span className="card-preview-type">{selectedCard.type}</span>
               </div>
 
+              <div className="card-preview-keywords">
+                {previewKeywords.length === 0
+                  ? <span className="keyword-chip none">No Keywords</span>
+                  : previewKeywords.map(k => (
+                      <span key={k.id} className={`keyword-chip ${k.id}`}>{k.label}</span>
+                    ))}
+              </div>
+
               <div className="card-preview-description">
                 {selectedCard.ability || 'No special ability.'}
               </div>
+
+              <ul className="card-preview-rules">
+                {previewKeywords.map(k => <li key={k.id}>{k.rule}</li>)}
+                {previewIsSpell && <li>Resolves immediately and leaves no unit on board.</li>}
+                {!previewIsSpell && !previewHasRush && (
+                  <li>Summoning Sickness — cannot attack until your next turn.</li>
+                )}
+              </ul>
 
               <div className="card-preview-bottom">
                 {selectedCard.attack > 0 && (
