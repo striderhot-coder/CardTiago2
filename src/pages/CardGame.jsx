@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from '../supabaseClient'
 import React, { useState, useEffect, useRef } from 'react'
 import { cardsData } from '../data/universeData'
 import { galleryCards } from '../data/galleryCards'
+import { spellCards, legacySpellEffects } from '../data/spellCards'
 import { 
   FaGamepad, 
   FaShieldAlt, 
@@ -37,9 +38,106 @@ import {
   FaStar
 } from 'react-icons/fa'
 
-// Deck = the hand-authored Converging Reality cards plus every artwork in the
-// Work, More Work and Surreal galleries (see data/galleryCards.js).
-const CARD_POOL = [...cardsData, ...galleryCards]
+// Deck = the hand-authored Converging Reality cards, every artwork in the Work,
+// More Work and Surreal galleries, and the Magic-style spell pool.
+const CARD_POOL = [...cardsData, ...galleryCards, ...spellCards]
+
+// A match is played with a 40-card draft rather than the whole pool, so games
+// differ twice over: which cards you get, and what their rolled stats are.
+const DECK_SIZE = 40
+const DECK_CURVE = { 1: 5, 2: 6, 3: 6, 4: 6, 5: 5, 6: 4, 7: 4, 8: 4 }
+const MAX_COPIES = 2
+
+const randInt = (min, max) => min + Math.floor(Math.random() * (max - min + 1))
+
+// Fisher-Yates: the previous `sort(() => Math.random() - 0.5)` shuffle was
+// biased, which made low-cost cards cluster at the top of the deck.
+const shuffle = (list) => {
+  const out = [...list]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
+
+// Gallery cards already carry a keyword prefix; strip it before rolling a new
+// one so the engine never sees "Taunt. Rush. ...".
+const KEYWORD_PREFIX = /^(taunt|rush)\.\s*/i
+
+// Roll a copy of a card. Total stats track the mana cost so a drafted 3-drop is
+// comparable whether it came from the gallery or the hand-authored set, then the
+// keyword shifts the split: Taunt trades attack for health, Rush the reverse.
+const rollCard = (card) => {
+  if (card.type === 'Spell') return { ...card }
+
+  const cost = card.cost
+  const flavour = (card.ability || '').replace(KEYWORD_PREFIX, '').trim()
+
+  if (card.type !== 'Unit' && card.type !== 'Hero') {
+    // Realms and Artifacts always enter as forced-taunt walls: fat health, little attack
+    const budget = 2 * cost + 1
+    return {
+      ...card,
+      attack: randInt(0, Math.max(1, Math.floor(cost / 2))),
+      health: Math.round(budget * 0.75) + randInt(0, 2),
+      ability: `Taunt. ${flavour}`.trim()
+    }
+  }
+
+  const roll = Math.random()
+  const keyword = roll < 0.16 ? 'Taunt' : roll < 0.3 ? 'Rush' : ''
+  // Total stats track the gallery stat lines (a 5-drop is worth about 11 stats)
+  const budget = Math.max(2, 2 * cost + 1 + randInt(-1, 1))
+  let attack = Math.max(1, Math.round(budget * (0.35 + Math.random() * 0.3)))
+  attack = Math.min(attack, budget - 1)
+  let health = budget - attack
+
+  if (keyword === 'Taunt') { health += 1; attack = Math.max(1, attack - 1) }
+  if (keyword === 'Rush') { attack += 1; health = Math.max(1, health - 1) }
+
+  return {
+    ...card,
+    attack,
+    health,
+    ability: keyword ? `${keyword}. ${flavour}`.trim() : flavour
+  }
+}
+
+const buildDeck = () => {
+  const byCost = new Map()
+  CARD_POOL.forEach(card => {
+    const list = byCost.get(card.cost) || []
+    list.push(card)
+    byCost.set(card.cost, list)
+  })
+
+  const taken = new Map()
+  const deck = []
+
+  const pickAt = (cost) => {
+    // Widen outwards from the wanted cost so a thin bucket can never stall the draft
+    for (let drift = 0; drift <= 8; drift++) {
+      for (const candidate of [cost + drift, cost - drift]) {
+        const fresh = shuffle(byCost.get(candidate) || []).find(c => (taken.get(c.id) || 0) < MAX_COPIES)
+        if (fresh) {
+          taken.set(fresh.id, (taken.get(fresh.id) || 0) + 1)
+          return fresh
+        }
+      }
+    }
+    return null
+  }
+
+  Object.entries(DECK_CURVE).forEach(([cost, count]) => {
+    for (let i = 0; i < count; i++) {
+      const picked = pickAt(Number(cost))
+      if (picked) deck.push(rollCard(picked))
+    }
+  })
+
+  return shuffle(deck)
+}
 
 // Monotonic ids so no two card copies can ever collide (Date.now()+random did,
 // which surfaced as duplicate React keys once the pool grew past 90 cards).
@@ -53,7 +151,12 @@ const HERO_MAX_HP = 100
 // the readout never claims an effect the engine ignores: Realms/Artifacts always
 // enter as forced-taunt defenders, and Rush only applies to Unit/Hero cards.
 const cardKeywords = (card) => {
-  if (!card || card.type === 'Spell') return []
+  if (!card) return []
+  if (card.type === 'Spell') {
+    return card.targeting && card.targeting !== 'none'
+      ? [{ id: 'spell', label: 'Targeted', rule: 'Tap the unit or Hero this spell should hit.' }]
+      : [{ id: 'spell', label: 'Instant', rule: 'Resolves as soon as it is cast.' }]
+  }
   const text = (card.ability || '').toLowerCase()
   const isUnit = card.type === 'Unit' || card.type === 'Hero'
   const out = []
@@ -74,28 +177,31 @@ const DIFFICULTIES = {
     label: 'Easy',
     title: 'Rookie Sentinel',
     icon: FaStar,
-    desc: 'Deploys slowly, attacks with part of its board',
+    desc: 'Deploys slowly, attacks with part of its board, never casts spells',
     deployChance: 0.6,
     attackRatio: 0.5,
-    heroPower: false
+    heroPower: false,
+    castsSpells: false
   },
   medium: {
     label: 'Medium',
     title: 'Veteran Sentinel',
     icon: FaRobot,
-    desc: 'Deploys every turn and swings with everything',
+    desc: 'Deploys every turn, casts spells and swings with everything',
     deployChance: 1,
     attackRatio: 1,
-    heroPower: false
+    heroPower: false,
+    castsSpells: true
   },
   hard: {
     label: 'Hard',
     title: 'Overlord Sentinel',
     icon: FaSkull,
-    desc: 'Spends all mana, trades smartly, goes for lethal',
+    desc: 'Spends all mana, casts spells, trades smartly, goes for lethal',
     deployChance: 1,
     attackRatio: 1,
     heroPower: true,
+    castsSpells: true,
     maxDeploys: 3
   }
 }
@@ -491,6 +597,10 @@ const CardGame = () => {
   
   const [p1Hand, setP1Hand] = useState([])
   const [p2Hand, setP2Hand] = useState([])
+
+  // The AI plans its turn inside chained timeouts, so it reads its hand live
+  const p2HandRef = useRef([])
+  useEffect(() => { p2HandRef.current = p2Hand }, [p2Hand])
   
   // Boards
   const [p1Board, setP1Board] = useState([])
@@ -506,12 +616,23 @@ const CardGame = () => {
   useEffect(() => { p1BoardRef.current = p1Board }, [p1Board])
   const p1HpRef = useRef(HERO_MAX_HP)
   useEffect(() => { p1HpRef.current = p1Hp }, [p1Hp])
+  // Spells can hit either hero, so both pools need a live mirror
+  const p2HpRef = useRef(HERO_MAX_HP)
+  useEffect(() => { p2HpRef.current = p2Hp }, [p2Hp])
   
   // Combat selection (click fallback & drag)
   const [selectedAttacker, setSelectedAttacker] = useState(null)
 
   // Card currently shown in the zoomed inspection overlay
   const [selectedCard, setSelectedCard] = useState(null)
+
+  // Unit already on a battlefield shown in the same overlay, so any board card can
+  // be read without spending an attack on it. Holds { unit, owner }.
+  const [inspectedUnit, setInspectedUnit] = useState(null)
+
+  // A targeted spell waits here until the player taps what it should hit. Nothing
+  // is spent until then, so cancelling is free.
+  const [pendingSpell, setPendingSpell] = useState(null)
   
   // Drag-and-Drop Targeting Arrow & Floating Card State
   const [dragState, setDragState] = useState(null)
@@ -611,9 +732,9 @@ const CardGame = () => {
     setTimeout(() => setScreenShake(false), 450)
   }
 
-  // Create randomized deck
+  // Draft a fresh 40-card deck with newly rolled stats
   const createDeck = () => {
-    return [...CARD_POOL].sort(() => Math.random() - 0.5).map(card => ({
+    return buildDeck().map(card => ({
       ...card,
       instanceId: `${card.id}-${nextCardUid()}`
     }))
@@ -1005,16 +1126,24 @@ const CardGame = () => {
     playSFX('draw', sfxEnabled)
   }
 
+  // Same overlay, but for a unit that is already in play
+  const inspectUnit = (unit, owner) => {
+    setSelectedCard(null)
+    setInspectedUnit({ unit, owner })
+    playSFX('draw', sfxEnabled)
+  }
+
   const closeCardPreview = () => {
     setSelectedCard(null)
+    setInspectedUnit(null)
   }
 
   useEffect(() => {
-    if (!selectedCard) return
-    const onKey = (e) => { if (e.key === 'Escape') setSelectedCard(null) }
+    if (!selectedCard && !inspectedUnit) return
+    const onKey = (e) => { if (e.key === 'Escape') closeCardPreview() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedCard])
+  }, [selectedCard, inspectedUnit])
 
   // Start Game initialization
   const handleStartGame = (overrideMode = playMode, overrideRole = myRole) => {
@@ -1045,6 +1174,9 @@ const CardGame = () => {
     setP1Board([])
     setP2Board([])
     setSelectedAttacker(null)
+    setSelectedCard(null)
+    setInspectedUnit(null)
+    setPendingSpell(null)
 
     setTurn('p1')
     setTurnCount(1)
@@ -1205,6 +1337,337 @@ const CardGame = () => {
   }
 
   // Play a card from hand with Hearthstone Slam/Spell effects
+  // ===========================================================================
+  // SPELL ENGINE
+  // ===========================================================================
+  // Boards and hero HP are read through their refs and written back immediately,
+  // so a spell that hits several targets in sequence never resurrects a unit that
+  // an earlier hit already killed.
+  const boardMirror = (tag) => (tag === 'p1' ? p1BoardRef : p2BoardRef)
+  const hpMirror = (tag) => (tag === 'p1' ? p1HpRef : p2HpRef)
+  const setBoardFor = (tag) => (tag === 'p1' ? setP1Board : setP2Board)
+  const liveUnits = (tag) => boardMirror(tag).current.filter(u => u.currentHp > 0)
+
+  // Log wording: in single player the human is always p1
+  const heroLabel = (tag) =>
+    (tag === 'p1' && playMode === 'single') ? 'your Hero' : `${tag === 'p1' ? p1HeroName : p2HeroName}'s Hero`
+
+  const damageHero = (targetTag, amount, sourceName) => {
+    if (amount <= 0) return
+    const mirror = hpMirror(targetTag)
+    const next = Math.max(0, mirror.current - amount)
+    mirror.current = next
+    ;(targetTag === 'p1' ? setP1Hp : setP2Hp)(next)
+
+    triggerFloatingDmg(`hero-${targetTag}`, `-${amount}`, 'dmg')
+    triggerScreenShake()
+    playSFX('hit', sfxEnabled)
+    addLog(`💥 ${sourceName} hit ${heroLabel(targetTag)} for ${amount} damage!`)
+
+    if (next > 0) return
+    if (targetTag === 'p1') {
+      setGameMode(playMode === 'single' ? 'defeat' : 'victory')
+      setWinner('p2')
+      playSFX(playMode === 'single' ? 'defeat' : 'victory', sfxEnabled)
+    } else {
+      setGameMode('victory')
+      setWinner('p1')
+      playSFX('victory', sfxEnabled)
+    }
+  }
+
+  const healHero = (targetTag, amount, sourceName) => {
+    const mirror = hpMirror(targetTag)
+    const next = Math.min(HERO_MAX_HP, mirror.current + amount)
+    const gained = next - mirror.current
+    mirror.current = next
+    ;(targetTag === 'p1' ? setP1Hp : setP2Hp)(next)
+    triggerFloatingDmg(`hero-${targetTag}`, `+${gained}`, 'heal')
+    playSFX('draw', sfxEnabled)
+    addLog(gained > 0
+      ? `💚 ${sourceName} restored ${gained} Health to ${heroLabel(targetTag)}!`
+      : `💚 ${sourceName} found ${heroLabel(targetTag)} already at full Health.`)
+  }
+
+  const damageUnits = (ownerTag, targets, amount, sourceName) => {
+    if (!targets.length || amount <= 0) return
+    const ids = new Set(targets.map(u => u.instanceId))
+    const mirror = boardMirror(ownerTag)
+
+    targets.forEach(u => triggerFloatingDmg(u.instanceId, `-${amount}`, 'dmg'))
+    triggerScreenShake()
+    playSFX('hit', sfxEnabled)
+
+    mirror.current = mirror.current
+      .map(u => (ids.has(u.instanceId) ? { ...u, currentHp: u.currentHp - amount } : u))
+      .filter(u => u.currentHp > 0)
+    setBoardFor(ownerTag)(mirror.current)
+
+    targets.forEach(u => {
+      if (u.currentHp - amount <= 0) addLog(`☠️ ${u.card.name} was destroyed by ${sourceName}!`)
+    })
+  }
+
+  const destroyUnits = (ownerTag, targets, sourceName) => {
+    if (!targets.length) return
+    const ids = new Set(targets.map(u => u.instanceId))
+    const mirror = boardMirror(ownerTag)
+
+    targets.forEach(u => triggerFloatingDmg(u.instanceId, '☠️', 'dmg'))
+    triggerScreenShake()
+    playSFX('hit', sfxEnabled)
+
+    mirror.current = mirror.current.filter(u => !ids.has(u.instanceId))
+    setBoardFor(ownerTag)(mirror.current)
+    targets.forEach(u => addLog(`☠️ ${sourceName} destroyed ${u.card.name}!`))
+  }
+
+  const buffUnit = (ownerTag, unit, attack, health, sourceName) => {
+    const mirror = boardMirror(ownerTag)
+    mirror.current = mirror.current.map(u => (u.instanceId === unit.instanceId
+      ? { ...u, attack: u.attack + attack, currentHp: u.currentHp + health, maxHp: u.maxHp + health }
+      : u))
+    setBoardFor(ownerTag)(mirror.current)
+    triggerFloatingDmg(unit.instanceId, `+${attack}/+${health}`, 'heal')
+    playSFX('draw', sfxEnabled)
+    addLog(`💪 ${sourceName} gave ${unit.card.name} +${attack}/+${health}!`)
+  }
+
+  const stealUnit = (fromTag, toTag, unit, sourceName) => {
+    const fromMirror = boardMirror(fromTag)
+    const toMirror = boardMirror(toTag)
+    fromMirror.current = fromMirror.current.filter(u => u.instanceId !== unit.instanceId)
+    setBoardFor(fromTag)(fromMirror.current)
+    // A stolen unit is treated as freshly summoned, so it waits a turn
+    toMirror.current = [...toMirror.current, { ...unit, readyToAttack: false, isJustSummoned: true }]
+    setBoardFor(toTag)(toMirror.current)
+    triggerScreenShake()
+    playSFX('spell', sfxEnabled)
+    addLog(`🌀 ${sourceName} stole ${unit.card.name}!`)
+  }
+
+  const summonTokens = (ownerTag, effect, sourceName) => {
+    const tokens = Array.from({ length: effect.count }, () => ({
+      instanceId: `token-${nextCardUid()}`,
+      card: {
+        name: effect.tokenName,
+        src: effect.tokenSrc,
+        type: 'Unit',
+        cost: 0,
+        attack: effect.attack,
+        health: effect.health,
+        rarity: 'Common',
+        ability: effect.taunt ? 'Taunt. A token summoned by magic.' : 'A token summoned by magic.'
+      },
+      currentHp: effect.health,
+      maxHp: effect.health,
+      attack: effect.attack,
+      hasTaunt: !!effect.taunt,
+      readyToAttack: false,
+      isJustSummoned: true
+    }))
+    const mirror = boardMirror(ownerTag)
+    mirror.current = [...mirror.current, ...tokens]
+    setBoardFor(ownerTag)(mirror.current)
+    playSFX('spell', sfxEnabled)
+    addLog(`✨ ${sourceName} summoned ${effect.count} ${effect.attack}/${effect.health} ${effect.tokenName}${effect.taunt ? ' with Taunt' : ''}!`)
+  }
+
+  // Targets a spell can legally hit, as { kind, unit?, owner }
+  const findSpellTargets = (card, casterTag) => {
+    const foeTag = casterTag === 'p1' ? 'p2' : 'p1'
+    const foes = liveUnits(foeTag).map(u => ({ kind: 'unit', unit: u, owner: foeTag }))
+    const friends = liveUnits(casterTag).map(u => ({ kind: 'unit', unit: u, owner: casterTag }))
+
+    switch (card.targeting) {
+      case 'enemyUnit': return foes
+      case 'friendlyUnit': return friends
+      case 'anyEnemy': return [...foes, { kind: 'hero', owner: foeTag }]
+      default: return []
+    }
+  }
+
+  const applySpellEffect = (card, casterTag, target) => {
+    const effect = card.effect || legacySpellEffects[card.name]
+    const foeTag = casterTag === 'p1' ? 'p2' : 'p1'
+
+    if (!effect) {
+      // Unmodelled legacy spells keep their original behaviour
+      damageHero(foeTag, 4, card.name)
+      return
+    }
+
+    switch (effect.kind) {
+      case 'damageHero':
+        damageHero(foeTag, effect.value, card.name)
+        break
+
+      case 'damageAll': {
+        const foes = liveUnits(foeTag)
+        if (!foes.length) {
+          addLog(`🌀 ${card.name} found no enemy units to hit.`)
+          break
+        }
+        damageUnits(foeTag, foes, effect.value, card.name)
+        break
+      }
+
+      case 'damageRandom': {
+        for (let i = 0; i < effect.hits; i++) {
+          const foes = liveUnits(foeTag)
+          if (foes.length) {
+            damageUnits(foeTag, [foes[Math.floor(Math.random() * foes.length)]], effect.value, card.name)
+          } else {
+            damageHero(foeTag, effect.value, card.name)
+          }
+        }
+        break
+      }
+
+      case 'damageAny':
+        if (target?.kind === 'hero') damageHero(target.owner, effect.value, card.name)
+        else if (target?.unit) damageUnits(target.owner, [target.unit], effect.value, card.name)
+        break
+
+      case 'drain':
+        if (target?.kind === 'hero') damageHero(target.owner, effect.value, card.name)
+        else if (target?.unit) damageUnits(target.owner, [target.unit], effect.value, card.name)
+        healHero(casterTag, effect.value, card.name)
+        break
+
+      case 'destroy':
+        if (target?.unit) destroyUnits(target.owner, [target.unit], card.name)
+        break
+
+      case 'buff':
+        if (target?.unit) buffUnit(target.owner, target.unit, effect.attack, effect.health, card.name)
+        break
+
+      case 'steal':
+        if (target?.unit) stealUnit(target.owner, casterTag, target.unit, card.name)
+        break
+
+      case 'draw':
+        drawCard(casterTag, effect.value)
+        addLog(`📜 ${card.name} drew ${effect.value} card${effect.value > 1 ? 's' : ''}.`)
+        break
+
+      case 'heal':
+        healHero(casterTag, effect.value, card.name)
+        break
+
+      case 'mana': {
+        const addMana = casterTag === 'p1' ? setP1Mana : setP2Mana
+        addMana(prev => prev + effect.value)
+        triggerFloatingDmg(`hero-${casterTag}`, `+${effect.value} Mana`, 'mana')
+        playSFX('spell', sfxEnabled)
+        addLog(`🔋 ${card.name} granted ${effect.value} Mana!`)
+        break
+      }
+
+      case 'summon':
+        summonTokens(casterTag, effect, card.name)
+        break
+
+      default:
+        addLog(`❓ ${card.name} fizzled.`)
+    }
+  }
+
+  // The AI has no cursor, so it targets the way a player would: answer the
+  // biggest threat, buff its best unit, and go face when the spell is lethal.
+  const aiChooseSpellTarget = (card) => {
+    const effect = card.effect || legacySpellEffects[card.name]
+    const foes = liveUnits('p1')
+    const friends = liveUnits('p2')
+    const biggest = (list) => list.reduce((a, b) => (b.attack + b.currentHp > a.attack + a.currentHp ? b : a))
+
+    if (card.targeting === 'enemyUnit') {
+      return foes.length ? { kind: 'unit', unit: biggest(foes), owner: 'p1' } : null
+    }
+    if (card.targeting === 'friendlyUnit') {
+      return friends.length ? { kind: 'unit', unit: biggest(friends), owner: 'p2' } : null
+    }
+    if (card.targeting === 'anyEnemy') {
+      const value = effect?.value || 0
+      if (!foes.length || value >= p1HpRef.current) return { kind: 'hero', owner: 'p1' }
+      return { kind: 'unit', unit: biggest(foes), owner: 'p1' }
+    }
+    return null
+  }
+
+  const aiCastSpell = (card) => {
+    const needsTarget = card.targeting && card.targeting !== 'none'
+    const target = needsTarget ? aiChooseSpellTarget(card) : null
+    if (needsTarget && !target) {
+      addLog(`🌀 ${p2HeroName}'s ${card.name} fizzled — no valid target.`)
+      return
+    }
+    playSFX('spell', sfxEnabled)
+    addLog(`🔮 ${p2HeroName} cast ${card.name}!`)
+    spellBurst(card.name)
+    applySpellEffect(card, 'p2', target)
+  }
+
+  // Deduct mana, leave the hand and count the play — shared by instant casts and
+  // by targeted spells once their target has been chosen.
+  const spendCard = (card, isP1) => {
+    if (isP1) {
+      setP1Mana(prev => prev - card.cost)
+      setP1Hand(prev => prev.filter(c => c.instanceId !== card.instanceId))
+    } else {
+      setP2Mana(prev => prev - card.cost)
+      setP2Hand(prev => prev.filter(c => c.instanceId !== card.instanceId))
+    }
+    setStats(prev => ({ ...prev, cardsPlayed: prev.cardsPlayed + 1 }))
+  }
+
+  const spellBurst = (name) => {
+    const burstId = `burst-${Date.now()}-${Math.random()}`
+    setSpellBursts(prev => [...prev, { id: burstId, name }])
+    setTimeout(() => setSpellBursts(prev => prev.filter(b => b.id !== burstId)), 800)
+  }
+
+  const casterLabel = (casterTag) => {
+    if (casterTag === 'p1') return p1HeroName
+    return playMode === 'single' ? 'AI Sentinel' : p2HeroName
+  }
+
+  const castPendingSpell = (target) => {
+    const pending = pendingSpell
+    if (!pending) return
+    setPendingSpell(null)
+
+    const { card, casterTag } = pending
+    playSFX('spell', sfxEnabled)
+    spendCard(card, casterTag === 'p1')
+    addLog(`🔮 ${casterLabel(casterTag)} cast ${card.name}!`)
+    spellBurst(card.name)
+    applySpellEffect(card, casterTag, target)
+
+    if (playMode === 'online_2p') queueSync()
+  }
+
+  const cancelPendingSpell = () => {
+    if (!pendingSpell) return
+    addLog(`↩️ ${pendingSpell.card.name} was cancelled — no Mana spent.`)
+    setPendingSpell(null)
+  }
+
+  useEffect(() => {
+    if (!pendingSpell) return
+    const onKey = (e) => { if (e.key === 'Escape') cancelPendingSpell() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pendingSpell])
+
+  // Is this unit/hero a legal target for the spell currently awaiting one?
+  const isSpellTarget = (ownerTag, unit) => {
+    if (!pendingSpell) return false
+    return findSpellTargets(pendingSpell.card, pendingSpell.casterTag)
+      .some(t => (unit ? t.kind === 'unit' && t.unit.instanceId === unit.instanceId : t.kind === 'hero') && t.owner === ownerTag)
+  }
+
   const handlePlayCard = (card) => {
     const isP1 = turn === 'p1'
 
@@ -1219,17 +1682,24 @@ const CardGame = () => {
       return
     }
 
-    playSFX(card.type === 'Spell' ? 'spell' : 'cardPlay', sfxEnabled)
+    const casterTag = isP1 ? 'p1' : 'p2'
 
-    if (isP1) {
-      setP1Mana(prev => prev - card.cost)
-      setP1Hand(prev => prev.filter(c => c.instanceId !== card.instanceId))
-    } else {
-      setP2Mana(prev => prev - card.cost)
-      setP2Hand(prev => prev.filter(c => c.instanceId !== card.instanceId))
+    // Targeted spells hold until the player taps something; nothing is spent yet
+    if (card.type === 'Spell' && card.targeting && card.targeting !== 'none') {
+      if (!findSpellTargets(card, casterTag).length) {
+        addLog(`❌ ${card.name} has no valid target right now.`)
+        return
+      }
+      setSelectedCard(null)
+      setPendingSpell({ card, casterTag })
+      playSFX('draw', sfxEnabled)
+      addLog(`🎯 Choose a target for ${card.name}.`)
+      return
     }
 
-    setStats(prev => ({ ...prev, cardsPlayed: prev.cardsPlayed + 1 }))
+    playSFX(card.type === 'Spell' ? 'spell' : 'cardPlay', sfxEnabled)
+
+    spendCard(card, isP1)
 
     const activePlayerName = isP1 ? p1HeroName : (playMode === 'single' ? 'AI Sentinel' : p2HeroName)
 
@@ -1252,64 +1722,8 @@ const CardGame = () => {
       addLog(`✨ ${activePlayerName} summoned ${card.name} (${card.attack}/${card.health}).`)
     } else if (card.type === 'Spell') {
       addLog(`🔮 ${activePlayerName} cast ${card.name}!`)
-
-      const burstId = `burst-${Date.now()}`
-      setSpellBursts(prev => [...prev, { id: burstId, name: card.name }])
-      setTimeout(() => setSpellBursts(prev => prev.filter(b => b.id !== burstId)), 800)
-
-      if (card.name === 'Astral Portal') {
-        const spirit1 = {
-          instanceId: `spirit-1-${Date.now()}-${Math.random()}`,
-          card: { name: 'Astral Spirit', src: 'Surreal/29.png' },
-          currentHp: 3, maxHp: 3, attack: 2, hasTaunt: true, readyToAttack: false, isJustSummoned: true
-        }
-        const spirit2 = {
-          instanceId: `spirit-2-${Date.now()}-${Math.random()}`,
-          card: { name: 'Astral Spirit', src: 'Surreal/29.png' },
-          currentHp: 3, maxHp: 3, attack: 2, hasTaunt: true, readyToAttack: false, isJustSummoned: true
-        }
-
-        if (isP1) setP1Board(prev => [...prev, spirit1, spirit2])
-        else setP2Board(prev => [...prev, spirit1, spirit2])
-        addLog(`✨ Astral Portal summoned two 2/3 Spirits with Taunt!`)
-      } else if (card.name === 'Hourglass of Fate') {
-        if (isP1) {
-          setP1Mana(prev => prev + 2)
-          triggerFloatingDmg('hero-p1', '+2 Mana', 'mana')
-        } else {
-          setP2Mana(prev => prev + 2)
-          triggerFloatingDmg('hero-p2', '+2 Mana', 'mana')
-        }
-        addLog(`⏳ Hourglass of Fate granted +2 Mana!`)
-      } else {
-        const dmg = 4
-        triggerScreenShake()
-        if (isP1) {
-          triggerFloatingDmg('hero-p2', `-${dmg}`, 'dmg')
-          setP2Hp(prev => {
-            const nextHp = Math.max(0, prev - dmg)
-            if (nextHp === 0) {
-              setGameMode('victory')
-              setWinner('p1')
-              playSFX('victory', sfxEnabled)
-            }
-            return nextHp
-          })
-        } else {
-          triggerFloatingDmg('hero-p1', `-${dmg}`, 'dmg')
-          setP1Hp(prev => {
-            const nextHp = Math.max(0, prev - dmg)
-            if (nextHp === 0) {
-              setGameMode(playMode === 'single' ? 'defeat' : 'victory')
-              setWinner('p2')
-              playSFX(playMode === 'single' ? 'defeat' : 'victory', sfxEnabled)
-            }
-            return nextHp
-          })
-        }
-        setStats(prev => ({ ...prev, damageDealt: prev.damageDealt + dmg }))
-        addLog(`💥 ${card.name} dealt ${dmg} damage to opponent Hero!`)
-      }
+      spellBurst(card.name)
+      applySpellEffect(card, casterTag, null)
     } else {
       const realmUnit = {
         instanceId: card.instanceId,
@@ -1333,18 +1747,17 @@ const CardGame = () => {
 
   // Select unit to attack (click fallback)
   const handleSelectAttacker = (unit, ownerPlayer) => {
-    if (playMode === 'online_2p' && turn !== myRole) {
-      addLog("❌ It is not your turn!")
+    // A spell awaiting a target consumes this tap instead of picking an attacker
+    if (pendingSpell) {
+      if (isSpellTarget(ownerPlayer, unit)) castPendingSpell({ kind: 'unit', unit, owner: ownerPlayer })
+      else addLog(`❌ ${unit.card.name} is not a valid target for ${pendingSpell.card.name}.`)
       return
     }
 
-    if (ownerPlayer !== turn) {
-      addLog("❌ You can only select units on your board!")
-      return
-    }
-
-    if (!unit.readyToAttack) {
-      addLog(`⏳ ${unit.card.name} cannot attack this turn (Exhausted).`)
+    // Nothing to attack with here, so the tap reads the card instead
+    const notMyTurn = playMode === 'online_2p' && turn !== myRole
+    if (notMyTurn || ownerPlayer !== turn || !unit.readyToAttack) {
+      inspectUnit(unit, ownerPlayer)
       return
     }
 
@@ -1359,8 +1772,18 @@ const CardGame = () => {
 
   // Attack Opponent Unit with Lunge, Hit Impact & Disintegration
   const handleAttackOpponentUnit = (targetUnit, targetOwner) => {
+    if (pendingSpell) {
+      if (isSpellTarget(targetOwner, targetUnit)) castPendingSpell({ kind: 'unit', unit: targetUnit, owner: targetOwner })
+      else addLog(`❌ ${targetUnit.card.name} is not a valid target for ${pendingSpell.card.name}.`)
+      return
+    }
+
     const attacker = selectedAttacker || (dragState && dragState.type === 'attack' ? dragState.item : null)
-    if (!attacker) return
+    // With no attacker committed, the tap reads the enemy card instead
+    if (!attacker) {
+      inspectUnit(targetUnit, targetOwner)
+      return
+    }
 
     if (playMode === 'online_2p' && turn !== myRole) {
       addLog("❌ It is not your turn!")
@@ -1437,6 +1860,13 @@ const CardGame = () => {
 
   // Attack Opponent Hero with Lunge, Screen Shake & Hit SFX
   const handleAttackOpponentHero = (targetHeroPlayer) => {
+    // Spells ignore Taunt, unlike attacks, so this is checked first
+    if (pendingSpell) {
+      if (isSpellTarget(targetHeroPlayer)) castPendingSpell({ kind: 'hero', owner: targetHeroPlayer })
+      else addLog(`❌ You cannot target that Hero with ${pendingSpell.card.name}.`)
+      return
+    }
+
     const attacker = selectedAttacker || (dragState && dragState.type === 'attack' ? dragState.item : null)
     if (!attacker) return
 
@@ -1508,6 +1938,8 @@ const CardGame = () => {
     if (playMode === 'online_2p' && turn !== myRole) return
 
     setSelectedAttacker(null)
+    setPendingSpell(null)
+    setInspectedUnit(null)
     const nextTurn = turn === 'p1' ? 'p2' : 'p1'
     setTurn(nextTurn)
     addLog(`⌛ ${turn === 'p1' ? p1HeroName : p2HeroName} ended their turn.`)
@@ -1573,7 +2005,7 @@ const CardGame = () => {
         currentHp: card.health,
         maxHp: card.health,
         attack: card.attack,
-        hasTaunt: card.rarity === 'Legendary' || card.rarity === 'Epic' || /taunt/i.test(card.ability || ''),
+        hasTaunt: /taunt/i.test(card.ability || ''),
         readyToAttack: isRush,
         isJustSummoned: true
       }
@@ -1592,31 +2024,53 @@ const CardGame = () => {
       setP2Mana(nextP2Max)
       addLog(`🤖 ${cfg.title} — Turn ${turnCount + 1}: Refilled Mana (${nextP2Max}/${nextP2Max}).`)
 
-      // ---- Deployment plan ----
+      // ---- Play plan ----
+      // The AI spends from its own drafted hand, exactly like the player, so a
+      // match is decided by what each side drafted rather than by the full pool.
       const plan = []
       if (Math.random() < cfg.deployChance) {
-        const affordable = CARD_POOL.filter(c => c.cost <= nextP2Max && c.type !== 'Spell')
-        if (cfg.maxDeploys) {
-          // Hard curves out: biggest affordable card first, keeping 2 mana aside
-          // for its Hero Power once it has 4 or more.
-          let manaLeft = nextP2Max >= 4 ? nextP2Max - 2 : nextP2Max
-          for (let i = 0; i < cfg.maxDeploys && manaLeft > 0; i++) {
-            const opts = affordable.filter(c => c.cost <= manaLeft)
-            if (!opts.length) break
-            const best = opts.reduce((a, b) => (b.cost > a.cost ? b : a))
-            plan.push(best)
-            manaLeft -= best.cost
+        const playable = (c) => {
+          if (c.type !== 'Spell') return true
+          if (!cfg.castsSpells) return false
+          if (!c.targeting || c.targeting === 'none') return true
+          return findSpellTargets(c, 'p2').length > 0
+        }
+
+        const plays = cfg.maxDeploys || 1
+        // Hard keeps 2 mana aside for its Hero Power once it has 4 or more
+        let manaLeft = cfg.maxDeploys && nextP2Max >= 4 ? nextP2Max - 2 : nextP2Max
+        const taken = new Set()
+
+        for (let i = 0; i < plays && manaLeft > 0; i++) {
+          let opts = p2HandRef.current.filter(c =>
+            !taken.has(c.instanceId) && c.cost <= manaLeft && playable(c))
+          if (!opts.length) break
+
+          if (!cfg.maxDeploys && difficulty === 'easy') {
+            const cheap = opts.filter(c => c.cost <= Math.max(1, Math.ceil(nextP2Max / 2)))
+            if (cheap.length) opts = cheap
           }
-        } else if (affordable.length) {
-          // Easy sticks to cheap cards, Medium picks freely
-          const cheap = affordable.filter(c => c.cost <= Math.max(1, Math.ceil(nextP2Max / 2)))
-          const pool = difficulty === 'easy' && cheap.length ? cheap : affordable
-          plan.push(pool[Math.floor(Math.random() * pool.length)])
+
+          const pick = cfg.maxDeploys
+            ? opts.reduce((a, b) => (b.cost > a.cost ? b : a))
+            : opts[Math.floor(Math.random() * opts.length)]
+
+          plan.push(pick)
+          taken.add(pick.instanceId)
+          manaLeft -= pick.cost
         }
       }
 
       const spent = plan.reduce((sum, c) => sum + c.cost, 0)
-      plan.forEach((card, i) => after(() => deploy(card), 380 * i))
+      if (plan.length) {
+        const played = new Set(plan.map(c => c.instanceId))
+        setP2Hand(prev => prev.filter(c => !played.has(c.instanceId)))
+        setP2Mana(prev => Math.max(0, prev - spent))
+      }
+      plan.forEach((card, i) => after(() => {
+        if (card.type === 'Spell') aiCastSpell(card)
+        else deploy(card)
+      }, 380 * i))
 
       // ---- Attack phase ----
       after(() => {
@@ -1727,9 +2181,19 @@ const CardGame = () => {
 
   const isMyTurn = playMode === 'online_2p' ? turn === myRole : true
 
-  const previewKeywords = cardKeywords(selectedCard)
-  const previewIsSpell = selectedCard?.type === 'Spell'
+  // The overlay reads either a hand card or a unit already in play. A board unit
+  // shows its live numbers rather than the printed ones.
+  const previewUnit = inspectedUnit ? inspectedUnit.unit : null
+  const previewIsBoardUnit = !selectedCard && !!previewUnit
+  const previewCard = selectedCard || (previewUnit
+    ? { ...previewUnit.card, attack: previewUnit.attack, health: previewUnit.currentHp }
+    : null)
+  const previewKeywords = cardKeywords(previewCard)
+  const previewIsSpell = previewCard?.type === 'Spell'
   const previewHasRush = previewKeywords.some(k => k.id === 'rush')
+  const previewUnitStatus = previewIsBoardUnit
+    ? `${inspectedUnit.owner === myPlayerTag ? 'Your' : "Opponent's"} ${previewUnit.hasTaunt ? 'Taunt ' : ''}unit — ${previewUnit.readyToAttack ? 'ready to attack' : 'exhausted until its next turn'}`
+    : ''
 
   return (
     <div className="work-page card-game-page">
@@ -1900,7 +2364,8 @@ const CardGame = () => {
               <li><strong>Tap or Drag to Attack:</strong> On a phone, tap a ready unit on your board then tap an enemy unit or Hero to strike. On desktop you can also drag it onto the target!</li>
               <li><strong>Tap or Drag to Play:</strong> Tap a card in your hand to summon/cast it, or drag it onto the battlefield with a mouse!</li>
               <li><strong>AI Difficulty:</strong> Single Player offers Easy, Medium and Hard Sentinels — Easy holds back attacks, Hard spends every crystal, trades smartly and uses its Hero Power.</li>
-              <li><strong>Portfolio Deck:</strong> Every artwork from the Work, More Work and Surreal galleries is a playable card — {CARD_POOL.length} unique cards in each deck!</li>
+              <li><strong>Drafted Deck:</strong> Each match drafts a random {DECK_SIZE}-card deck from the {CARD_POOL.length}-card portfolio pool, and every unit's Attack, Health and keyword are rolled fresh — so no two games play the same.</li>
+              <li><strong>Magic Spells:</strong> Bolts, board wipes, draws, heals, destroy, buff, steal and summon effects. Spells marked <strong>Targeted</strong> make you tap the unit or Hero they hit.</li>
             </ul>
           </div>
 
@@ -2049,7 +2514,7 @@ const CardGame = () => {
           {/* HEARTHSTONE HERO PORTRAIT: OPPONENT (TOP) */}
           <div 
             data-hero-id={oppPlayerTag}
-            className={`hs-hero-portrait-card opp-hero ${impactId === `hero-${oppPlayerTag}` ? 'hero-impact-shake' : ''}`}
+            className={`hs-hero-portrait-card opp-hero ${impactId === `hero-${oppPlayerTag}` ? 'hero-impact-shake' : ''} ${isSpellTarget(oppPlayerTag) ? 'spell-target' : ''}`}
           >
             {floatingDmg.filter(p => p.targetId === `hero-${oppPlayerTag}`).map(p => (
               <div key={p.id} className={`floating-dmg-popup ${p.type}`}>{p.text}</div>
@@ -2103,7 +2568,7 @@ const CardGame = () => {
                       key={unit.instanceId} 
                       data-unit-id={unit.instanceId}
                       data-owner={oppPlayerTag}
-                      className={`board-unit-card enemy-unit ${selectedAttacker || (dragState && dragState.type === 'attack') ? 'targetable' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-down' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
+                      className={`board-unit-card enemy-unit ${selectedAttacker || (dragState && dragState.type === 'attack') ? 'targetable' : ''} ${isSpellTarget(oppPlayerTag, unit) ? 'spell-target' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-down' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
                       onClick={() => handleAttackOpponentUnit(unit, oppPlayerTag)}
                     >
                       {floatingDmg.filter(p => p.targetId === unit.instanceId).map(p => (
@@ -2116,6 +2581,14 @@ const CardGame = () => {
                       <div className="unit-stats">
                         <span className="atk"><FaBolt /> {unit.attack}</span>
                         <span className="hp"><FaShieldAlt /> {unit.currentHp}/{unit.maxHp}</span>
+                        <button
+                          className="unit-inspect-btn"
+                          aria-label={`Inspect ${unit.card.name}`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); inspectUnit(unit, oppPlayerTag) }}
+                        >
+                          <FaInfoCircle />
+                        </button>
                       </div>
                     </div>
                   )
@@ -2164,7 +2637,7 @@ const CardGame = () => {
                       key={unit.instanceId} 
                       data-unit-id={unit.instanceId}
                       data-owner={myPlayerTag}
-                      className={`board-unit-card player-unit ${unit.readyToAttack ? 'ready drag-targetable' : 'exhausted'} ${isSelected ? 'selected' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-up' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
+                      className={`board-unit-card player-unit ${unit.readyToAttack ? 'ready drag-targetable' : 'exhausted'} ${isSelected ? 'selected' : ''} ${isSpellTarget(myPlayerTag, unit) ? 'spell-target' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-up' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
                       onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
                       onClick={() => handleSelectAttacker(unit, myPlayerTag)}
                     >
@@ -2179,6 +2652,14 @@ const CardGame = () => {
                       <div className="unit-stats">
                         <span className="atk"><FaBolt /> {unit.attack}</span>
                         <span className="hp"><FaShieldAlt /> {unit.currentHp}/{unit.maxHp}</span>
+                        <button
+                          className="unit-inspect-btn"
+                          aria-label={`Inspect ${unit.card.name}`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); inspectUnit(unit, myPlayerTag) }}
+                        >
+                          <FaInfoCircle />
+                        </button>
                       </div>
                     </div>
                   )
@@ -2282,7 +2763,8 @@ const CardGame = () => {
                             ))}
                           </span>
                         )}
-                        {card.ability}
+                        {/* The chips above already name the keyword, so drop the prefix from the face text */}
+                        {(card.ability || '').replace(KEYWORD_PREFIX, '').trim()}
                       </div>
 
                       <div className="hand-card-bottom">
@@ -2299,12 +2781,25 @@ const CardGame = () => {
       )}
 
       {/* ========================================================================= */}
+      {/* TARGETED SPELL AWAITING A TARGET                                           */}
+      {/* ========================================================================= */}
+      {pendingSpell && (
+        <div className="spell-targeting-banner">
+          <FaCrosshairs className="spell-targeting-icon" />
+          <span>
+            <strong>{pendingSpell.card.name}</strong> — {pendingSpell.card.ability}
+          </span>
+          <button className="spell-cancel-btn" onClick={cancelPendingSpell}>Cancel</button>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* ZOOMED CARD INSPECTION (Hearthstone-style amplify)                        */}
       {/* ========================================================================= */}
-      {selectedCard && (
+      {previewCard && (
         <div className="card-preview-overlay" onClick={closeCardPreview}>
           <div
-            className={`card-preview-modal rarity-${(selectedCard.rarity || 'common').toLowerCase()}`}
+            className={`card-preview-modal rarity-${(previewCard.rarity || 'common').toLowerCase()}`}
             onClick={(e) => e.stopPropagation()}
           >
             <button className="card-preview-close" onClick={closeCardPreview} aria-label="Close card preview">
@@ -2313,13 +2808,13 @@ const CardGame = () => {
 
             <div className="card-preview-card">
               <div className="card-preview-top">
-                <span className="card-preview-cost">{selectedCard.cost}</span>
-                <span className="card-preview-name">{selectedCard.name}</span>
+                <span className="card-preview-cost">{previewCard.cost}</span>
+                <span className="card-preview-name">{previewCard.name}</span>
               </div>
 
               <div className="card-preview-art">
-                <img src={selectedCard.src} alt={selectedCard.name} />
-                <span className="card-preview-type">{selectedCard.type}</span>
+                <img src={previewCard.src} alt={previewCard.name} />
+                <span className="card-preview-type">{previewCard.type}</span>
               </div>
 
               <div className="card-preview-keywords">
@@ -2331,42 +2826,44 @@ const CardGame = () => {
               </div>
 
               <div className="card-preview-description">
-                {selectedCard.ability || 'No special ability.'}
+                {previewCard.flavour || (previewCard.ability || '').replace(KEYWORD_PREFIX, '').trim() || 'No special ability.'}
               </div>
 
               <ul className="card-preview-rules">
                 {previewKeywords.map(k => <li key={k.id}>{k.rule}</li>)}
-                {previewIsSpell && <li>Resolves immediately and leaves no unit on board.</li>}
-                {!previewIsSpell && !previewHasRush && (
+                {previewIsBoardUnit && <li>{previewUnitStatus}</li>}
+                {!previewIsBoardUnit && !previewIsSpell && !previewHasRush && (
                   <li>Summoning Sickness — cannot attack until your next turn.</li>
                 )}
               </ul>
 
               <div className="card-preview-bottom">
-                {selectedCard.attack > 0 && (
-                  <span className="card-preview-stat attack"><FaBolt /> {selectedCard.attack}</span>
+                {previewCard.attack > 0 && (
+                  <span className="card-preview-stat attack"><FaBolt /> {previewCard.attack}</span>
                 )}
-                {selectedCard.health > 0 && (
-                  <span className="card-preview-stat health"><FaShieldAlt /> {selectedCard.health}</span>
+                {previewCard.health > 0 && (
+                  <span className="card-preview-stat health">
+                    <FaShieldAlt /> {previewCard.health}{previewIsBoardUnit ? `/${previewUnit.maxHp}` : ''}
+                  </span>
                 )}
               </div>
             </div>
 
-            {(() => {
-              const canAffordPreview = myMana >= selectedCard.cost && isMyTurn
+            {!previewIsBoardUnit && (() => {
+              const canAffordPreview = myMana >= previewCard.cost && isMyTurn
               return (
                 <button
                   className={`card-preview-play-btn ${!canAffordPreview ? 'disabled' : ''}`}
                   disabled={!canAffordPreview}
                   onClick={() => {
                     if (!canAffordPreview) return
-                    handlePlayCard(selectedCard)
+                    handlePlayCard(previewCard)
                     closeCardPreview()
                   }}
                 >
                   {canAffordPreview
-                    ? `Play Card — ${selectedCard.cost} Mana`
-                    : `Need ${selectedCard.cost} Mana`}
+                    ? `${previewIsSpell ? 'Cast Spell' : 'Play Card'} — ${previewCard.cost} Mana`
+                    : `Need ${previewCard.cost} Mana`}
                 </button>
               )
             })()}

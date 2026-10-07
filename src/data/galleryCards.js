@@ -36,10 +36,20 @@ const TYPES = ['Unit', 'Unit', 'Unit', 'Unit', 'Realm']
 
 // The engine grants Taunt/Rush by substring-scanning the ability text, so
 // flavour text must never contain those letters (e.g. "brushstrokes").
+const cleanDescription = (item) => (item.description || '').replace(/\s+/g, ' ').trim()
+
 const flavourText = (item, label) => {
-  const sentence = (item.description || '').replace(/\s+/g, ' ').trim().split('.')[0].trim()
+  const sentence = cleanDescription(item).split('.')[0].trim()
   if (!sentence || /(taunt|rush)/i.test(sentence)) return `From the ${label} gallery.`
   return sentence.length > 62 ? `${sentence.slice(0, 59).trimEnd()}…` : `${sentence}.`
+}
+
+// The zoomed inspector has room for the whole blurb, so it keeps an uncut copy.
+// Held without any keyword prefix so re-rolled keywords can never desync from it.
+const fullFlavourText = (item, label) => {
+  const whole = cleanDescription(item)
+  if (!whole || /(taunt|rush)/i.test(whole)) return `From the ${label} gallery.`
+  return whole.endsWith('.') ? whole : `${whole}.`
 }
 
 const buildCards = () => {
@@ -64,7 +74,8 @@ const buildCards = () => {
         attack: isRealm ? Math.max(1, Math.round(attack * 0.6)) : attack,
         health,
         src: item.src,
-        ability: `${keyword}${flavourText(item, gallery.label)}`
+        ability: `${keyword}${flavourText(item, gallery.label)}`,
+        flavour: fullFlavourText(item, gallery.label)
       })
     })
   })
