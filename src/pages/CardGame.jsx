@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { cardsData } from '../data/universeData'
 import { galleryCards } from '../data/galleryCards'
 import { spellCards, legacySpellEffects } from '../data/spellCards'
+import { playSFX, gameMusic } from '../audio/gameAudio'
 import { 
   FaGamepad, 
   FaShieldAlt, 
@@ -229,307 +230,6 @@ const heroTitlesPool = [
   'Zero (Void Walker)',
   'Tiago (Creative Sovereign)'
 ]
-
-// Lord of the Rings Inspired Web Audio Synthesizer
-// Browsers (Chrome on Android especially) cap the number of live AudioContexts,
-// so every sound must reuse one shared context instead of allocating a new one.
-let sharedAudioCtx = null
-const getAudioCtx = () => {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext
-  if (!AudioCtx) return null
-  if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx()
-  if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume()
-  return sharedAudioCtx
-}
-
-const playSFX = (type, enabled = true) => {
-  if (!enabled) return
-  try {
-    const ctx = getAudioCtx()
-    if (!ctx) return
-
-    const now = ctx.currentTime
-
-    if (type === 'attack') {
-      // Forged Steel Blade Slash (Narsil / Sting sword clash with metallic resonance)
-      const osc1 = ctx.createOscillator()
-      const osc2 = ctx.createOscillator()
-      const gain = ctx.createGain()
-      const filter = ctx.createBiquadFilter()
-
-      osc1.type = 'sawtooth'
-      osc2.type = 'sine'
-      filter.type = 'highpass'
-      filter.frequency.setValueAtTime(1200, now)
-
-      osc1.frequency.setValueAtTime(480, now)
-      osc1.frequency.exponentialRampToValueAtTime(80, now + 0.25)
-      osc2.frequency.setValueAtTime(1440, now)
-      osc2.frequency.exponentialRampToValueAtTime(300, now + 0.25)
-
-      gain.gain.setValueAtTime(0.4, now)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25)
-
-      osc1.connect(filter)
-      osc2.connect(filter)
-      filter.connect(gain)
-      gain.connect(ctx.destination)
-
-      osc1.start(now)
-      osc2.start(now)
-      osc1.stop(now + 0.25)
-      osc2.stop(now + 0.25)
-
-    } else if (type === 'hit') {
-      // Dwarven Warhammer / Iron Shield Impact (Deep sub-bass thud & shield impact)
-      const osc = ctx.createOscillator()
-      const sub = ctx.createOscillator()
-      const gain = ctx.createGain()
-
-      osc.type = 'triangle'
-      sub.type = 'sine'
-
-      osc.frequency.setValueAtTime(160, now)
-      osc.frequency.exponentialRampToValueAtTime(30, now + 0.3)
-      sub.frequency.setValueAtTime(60, now)
-      sub.frequency.exponentialRampToValueAtTime(20, now + 0.35)
-
-      gain.gain.setValueAtTime(0.6, now)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35)
-
-      osc.connect(gain)
-      sub.connect(gain)
-      gain.connect(ctx.destination)
-
-      osc.start(now)
-      sub.start(now)
-      osc.stop(now + 0.35)
-      sub.stop(now + 0.35)
-
-    } else if (type === 'spell') {
-      // Elven Magic Resonance (Light of Eärendil / Galadriel Chimes)
-      const freqs = [523.25, 659.25, 783.99, 1046.5]
-      freqs.forEach((freq, idx) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.type = 'sine'
-        const startTime = now + idx * 0.05
-        osc.frequency.setValueAtTime(freq, startTime)
-        osc.frequency.exponentialRampToValueAtTime(freq * 1.5, startTime + 0.4)
-
-        gain.gain.setValueAtTime(0.2, startTime)
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.45)
-
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        osc.start(startTime)
-        osc.stop(startTime + 0.45)
-      })
-
-    } else if (type === 'turn') {
-      // Horn of Gondor War Horn Pulse (Dual detuned sawtooth horn)
-      const osc1 = ctx.createOscillator()
-      const osc2 = ctx.createOscillator()
-      const filter = ctx.createBiquadFilter()
-      const gain = ctx.createGain()
-
-      osc1.type = 'sawtooth'
-      osc2.type = 'sawtooth'
-      filter.type = 'lowpass'
-      filter.frequency.setValueAtTime(600, now)
-      filter.frequency.linearRampToValueAtTime(1400, now + 0.3)
-
-      osc1.frequency.setValueAtTime(293.66, now)
-      osc1.frequency.linearRampToValueAtTime(440, now + 0.2)
-      osc2.frequency.setValueAtTime(297.0, now)
-      osc2.frequency.linearRampToValueAtTime(445, now + 0.2)
-
-      gain.gain.setValueAtTime(0.01, now)
-      gain.gain.linearRampToValueAtTime(0.4, now + 0.15)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6)
-
-      osc1.connect(filter)
-      osc2.connect(filter)
-      filter.connect(gain)
-      gain.connect(ctx.destination)
-
-      osc1.start(now)
-      osc2.start(now)
-      osc1.stop(now + 0.6)
-      osc2.stop(now + 0.6)
-
-    } else if (type === 'cardPlay') {
-      // Heavy Armor Plate / Shield Drop Clank
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'triangle'
-      osc.frequency.setValueAtTime(220, now)
-      osc.frequency.exponentialRampToValueAtTime(50, now + 0.18)
-
-      gain.gain.setValueAtTime(0.35, now)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18)
-
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(now)
-      osc.stop(now + 0.18)
-
-    } else if (type === 'draw') {
-      // Parchment / Elven Scroll Whoosh
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(320, now)
-      osc.frequency.exponentialRampToValueAtTime(750, now + 0.12)
-
-      gain.gain.setValueAtTime(0.2, now)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
-
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(now)
-      osc.stop(now + 0.12)
-
-    } else if (type === 'victory') {
-      // Gondor / Rohan Heroic Triumphant Fanfare (D Major Arpeggio)
-      const notes = [293.66, 369.99, 440.0, 587.33]
-      notes.forEach((freq, idx) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.type = 'triangle'
-        const startTime = now + idx * 0.12
-        osc.frequency.setValueAtTime(freq, startTime)
-
-        gain.gain.setValueAtTime(0.35, startTime)
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6)
-
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        osc.start(startTime)
-        osc.stop(startTime + 0.6)
-      })
-
-    } else if (type === 'defeat') {
-      // Mordor / Nazgûl Gloom Sub-Bass Drone
-      const osc1 = ctx.createOscillator()
-      const osc2 = ctx.createOscillator()
-      const gain = ctx.createGain()
-
-      osc1.type = 'sawtooth'
-      osc2.type = 'sine'
-
-      osc1.frequency.setValueAtTime(110, now)
-      osc1.frequency.exponentialRampToValueAtTime(35, now + 0.8)
-      osc2.frequency.setValueAtTime(55, now)
-      osc2.frequency.exponentialRampToValueAtTime(25, now + 0.8)
-
-      gain.gain.setValueAtTime(0.5, now)
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8)
-
-      osc1.connect(gain)
-      osc2.connect(gain)
-      gain.connect(ctx.destination)
-
-      osc1.start(now)
-      osc2.start(now)
-      osc1.stop(now + 0.8)
-      osc2.stop(now + 0.8)
-    }
-  } catch (e) {}
-}
-
-// Procedural Lo-Fi Ambient Chill Music Generator
-class ChillMusicPlayer {
-  constructor() {
-    this.ctx = null
-    this.timer = null
-    this.isPlaying = false
-  }
-
-  start() {
-    if (this.isPlaying) return
-    try {
-      this.ctx = getAudioCtx()
-      if (!this.ctx) return
-
-      this.isPlaying = true
-      let bar = 0
-
-      // Lo-fi Chill Chords (Cmaj7, Em7, Am7, Fmaj7)
-      const chords = [
-        [130.81, 164.81, 196.00, 246.94], // C3, E3, G3, B3
-        [164.81, 196.00, 246.94, 293.66], // E3, G3, B3, D4
-        [110.00, 130.81, 164.81, 196.00], // A2, C3, E3, G3
-        [174.61, 220.00, 261.63, 329.63]  // F3, A3, C4, E4
-      ]
-
-      const arpeggio = [329.63, 392.00, 493.88, 587.33, 659.25]
-
-      const playBar = () => {
-        if (!this.isPlaying || !this.ctx) return
-        const now = this.ctx.currentTime
-        const chord = chords[bar % chords.length]
-        bar++
-
-        // Warm Pad Chords
-        chord.forEach(freq => {
-          const osc = this.ctx.createOscillator()
-          const filter = this.ctx.createBiquadFilter()
-          const gain = this.ctx.createGain()
-
-          osc.type = 'sine'
-          osc.frequency.setValueAtTime(freq, now)
-
-          filter.type = 'lowpass'
-          filter.frequency.setValueAtTime(450, now)
-
-          gain.gain.setValueAtTime(0.01, now)
-          gain.gain.linearRampToValueAtTime(0.06, now + 1.2)
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 3.8)
-
-          osc.connect(filter)
-          filter.connect(gain)
-          gain.connect(this.ctx.destination)
-
-          osc.start(now)
-          osc.stop(now + 4.0)
-        })
-
-        // Gentle Ambient Plucks
-        for (let i = 0; i < 3; i++) {
-          const startTime = now + i * 1.2 + Math.random() * 0.4
-          const pluckFreq = arpeggio[Math.floor(Math.random() * arpeggio.length)]
-
-          const pOsc = this.ctx.createOscillator()
-          const pGain = this.ctx.createGain()
-          pOsc.type = 'sine'
-          pOsc.frequency.setValueAtTime(pluckFreq, startTime)
-
-          pGain.gain.setValueAtTime(0.03, startTime)
-          pGain.gain.exponentialRampToValueAtTime(0.001, startTime + 1.5)
-
-          pOsc.connect(pGain)
-          pGain.connect(this.ctx.destination)
-
-          pOsc.start(startTime)
-          pOsc.stop(startTime + 1.5)
-        }
-
-        this.timer = setTimeout(playBar, 4000)
-      }
-
-      playBar()
-    } catch (e) {}
-  }
-
-  stop() {
-    this.isPlaying = false
-    if (this.timer) clearTimeout(this.timer)
-    this.ctx = null
-  }
-}
-
-const chillMusic = new ChillMusicPlayer()
 
 const CardGame = () => {
   // Game state mode: 'menu' | 'playing' | 'victory' | 'defeat'
@@ -858,15 +558,25 @@ const CardGame = () => {
     turn, turnCount, logs, winner, gameMode, syncNonce
   ])
 
-  // Chill Background Music Controller
+  // Adaptive Background Score Controller
   useEffect(() => {
     if (gameMode === 'playing' && musicEnabled) {
-      chillMusic.start()
+      gameMusic.start()
     } else {
-      chillMusic.stop()
+      gameMusic.stop()
     }
-    return () => chillMusic.stop()
+    return () => gameMusic.stop()
   }, [gameMode, musicEnabled])
+
+  // The score thickens as the match develops and turns urgent once a Hero is
+  // close to dying, so the music tracks tension instead of looping flat.
+  useEffect(() => {
+    if (gameMode !== 'playing') return
+    const lowest = Math.min(p1Hp, p2Hp)
+    gameMusic.setIntensity(
+      lowest <= HERO_MAX_HP * 0.3 ? 'crisis' : turnCount >= 4 ? 'battle' : 'calm'
+    )
+  }, [gameMode, p1Hp, p2Hp, turnCount])
 
   // Phones get a full-bleed arena that hides the site chrome, so the match has
   // to provide its own way out (the Exit button in the arena's top bar).
@@ -1300,7 +1010,7 @@ const CardGame = () => {
     if (isP1) setP1Mana(prev => prev - 2)
     else setP2Mana(prev => prev - 2)
 
-    playSFX('spell', sfxEnabled)
+    playSFX('heroPower', sfxEnabled)
     triggerScreenShake()
 
     const targetHeroTag = isP1 ? 'p2' : 'p1'
@@ -1383,7 +1093,7 @@ const CardGame = () => {
     mirror.current = next
     ;(targetTag === 'p1' ? setP1Hp : setP2Hp)(next)
     triggerFloatingDmg(`hero-${targetTag}`, `+${gained}`, 'heal')
-    playSFX('draw', sfxEnabled)
+    playSFX('heal', sfxEnabled)
     addLog(gained > 0
       ? `💚 ${sourceName} restored ${gained} Health to ${heroLabel(targetTag)}!`
       : `💚 ${sourceName} found ${heroLabel(targetTag)} already at full Health.`)
@@ -1398,14 +1108,15 @@ const CardGame = () => {
     triggerScreenShake()
     playSFX('hit', sfxEnabled)
 
+    const deaths = targets.filter(u => u.currentHp - amount <= 0)
+    if (deaths.length) playSFX('destroy', sfxEnabled)
+
     mirror.current = mirror.current
       .map(u => (ids.has(u.instanceId) ? { ...u, currentHp: u.currentHp - amount } : u))
       .filter(u => u.currentHp > 0)
     setBoardFor(ownerTag)(mirror.current)
 
-    targets.forEach(u => {
-      if (u.currentHp - amount <= 0) addLog(`☠️ ${u.card.name} was destroyed by ${sourceName}!`)
-    })
+    deaths.forEach(u => addLog(`☠️ ${u.card.name} was destroyed by ${sourceName}!`))
   }
 
   const destroyUnits = (ownerTag, targets, sourceName) => {
@@ -1415,7 +1126,7 @@ const CardGame = () => {
 
     targets.forEach(u => triggerFloatingDmg(u.instanceId, '☠️', 'dmg'))
     triggerScreenShake()
-    playSFX('hit', sfxEnabled)
+    playSFX('destroy', sfxEnabled)
 
     mirror.current = mirror.current.filter(u => !ids.has(u.instanceId))
     setBoardFor(ownerTag)(mirror.current)
@@ -1429,7 +1140,7 @@ const CardGame = () => {
       : u))
     setBoardFor(ownerTag)(mirror.current)
     triggerFloatingDmg(unit.instanceId, `+${attack}/+${health}`, 'heal')
-    playSFX('draw', sfxEnabled)
+    playSFX('buff', sfxEnabled)
     addLog(`💪 ${sourceName} gave ${unit.card.name} +${attack}/+${health}!`)
   }
 
@@ -1469,7 +1180,7 @@ const CardGame = () => {
     const mirror = boardMirror(ownerTag)
     mirror.current = [...mirror.current, ...tokens]
     setBoardFor(ownerTag)(mirror.current)
-    playSFX('spell', sfxEnabled)
+    playSFX('deploy', sfxEnabled)
     addLog(`✨ ${sourceName} summoned ${effect.count} ${effect.attack}/${effect.health} ${effect.tokenName}${effect.taunt ? ' with Taunt' : ''}!`)
   }
 
@@ -1692,7 +1403,7 @@ const CardGame = () => {
       }
       setSelectedCard(null)
       setPendingSpell({ card, casterTag })
-      playSFX('draw', sfxEnabled)
+      playSFX('target', sfxEnabled)
       addLog(`🎯 Choose a target for ${card.name}.`)
       return
     }
@@ -1765,7 +1476,7 @@ const CardGame = () => {
       setSelectedAttacker(null)
     } else {
       setSelectedAttacker(unit)
-      playSFX('draw', sfxEnabled)
+      playSFX('target', sfxEnabled)
       addLog(`🎯 Selected ${unit.card.name}. Tap an opponent unit or Hero to attack!`)
     }
   }
@@ -1814,12 +1525,12 @@ const CardGame = () => {
         triggerFloatingDmg(attacker.instanceId, `-${defenderDmg}`, 'dmg')
       }
 
-      if (targetUnit.currentHp - attackerDmg <= 0) {
-        setDyingIds(prev => [...prev, targetUnit.instanceId])
-      }
-      if (attacker.currentHp - defenderDmg <= 0) {
-        setDyingIds(prev => [...prev, attacker.instanceId])
-      }
+      const defenderDies = targetUnit.currentHp - attackerDmg <= 0
+      const attackerDies = attacker.currentHp - defenderDmg <= 0
+
+      if (defenderDies) setDyingIds(prev => [...prev, targetUnit.instanceId])
+      if (attackerDies) setDyingIds(prev => [...prev, attacker.instanceId])
+      if (defenderDies || attackerDies) playSFX('destroy', sfxEnabled)
 
       setTimeout(() => {
         const updateBoard = (board, targetInstId, dmg, isAttacker = false) => {
@@ -2112,7 +1823,7 @@ const CardGame = () => {
               }
 
               if (target) {
-                playSFX('hit', sfxEnabled)
+                playSFX(target.currentHp - aiUnit.attack <= 0 ? 'destroy' : 'hit', sfxEnabled)
                 triggerScreenShake()
                 triggerFloatingDmg(target.instanceId, `-${aiUnit.attack}`, 'dmg')
                 addLog(`🚨 AI ${aiUnit.card.name} attacked your ${target.card.name} for ${aiUnit.attack} damage!`)
@@ -2133,7 +1844,7 @@ const CardGame = () => {
           const manaLeft = Math.max(0, nextP2Max - spent)
           if (cfg.heroPower && manaLeft >= 2) {
             setP2Mana(manaLeft - 2)
-            playSFX('spell', sfxEnabled)
+            playSFX('heroPower', sfxEnabled)
             addLog(`🔮 ${p2HeroName} used their Hero Power!`)
             damagePlayerHero(2, `${p2HeroName}'s Hero Power`)
           }
