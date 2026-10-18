@@ -12,6 +12,7 @@ import ConvergeReality from './pages/ConvergeReality'
 import Videos from './pages/Videos'
 import Universe from './pages/Universe'
 import CardGame from './pages/CardGame'
+import CosmicInvoice from './pages/CosmicInvoice'
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
             <Route path="/contact" element={<Contact />} />
             <Route path="/book" element={<ConvergeReality />} />
             <Route path="/videos" element={<Videos />} />
+            <Route path="/cosmic-invoice" element={<CosmicInvoice />} />
           </Routes>
         </main>
         <Footer />

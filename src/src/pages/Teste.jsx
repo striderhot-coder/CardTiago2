@@ -1,64 +1,124 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import Lightbox from '../components/Lightbox'
+import { moreWorkData } from '../data/moreWorkData'
+import { FaEye, FaInfoCircle, FaPlay, FaVolumeMute } from 'react-icons/fa'
+
+const isVideo = (src) => typeof src === 'string' && /\.(mp4|webm|ogg|mov)$/i.test(src)
+
+const ReelPreview = ({ project, isLightboxOpen }) => {
+  const videoRef = useRef(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
+
+  // Use provided thumbnail or fallback to jellyfish-thumb.jpg for videos
+  const thumbSrc = project.thumbnail || (isVideo(project.src) ? 'img2/jellyfish-thumb.jpg' : project.src)
+
+  // Pause and reset if Lightbox opens
+  useEffect(() => {
+    if (isLightboxOpen && videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
+      setIsPlaying(false)
+      setIsHovered(false)
+    }
+  }, [isLightboxOpen])
+
+  const handleMouseEnter = () => {
+    setIsHovered(true)
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0
+      const playPromise = videoRef.current.play()
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true)
+          })
+          .catch(() => {
+            // Autoplay policy or interruption handled safely
+          })
+      }
+    }
+  }
+
+  const handleMouseLeave = () => {
+    setIsHovered(false)
+    setIsPlaying(false)
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
+    }
+  }
+
+  return (
+    <div
+      className={`project-image-wrapper reel-wrapper ${isHovered ? 'reel-hovered' : ''}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* Crisp Static Thumbnail Image */}
+      <img
+        src={thumbSrc}
+        alt={project.title}
+        className={`reel-thumbnail-img ${isPlaying ? 'fade-out' : ''}`}
+        loading="lazy"
+      />
+
+      {/* Video Element for Pre-visualization (Reels Hover Preview) */}
+      <video
+        ref={videoRef}
+        src={`${project.src}#t=0.001`}
+        poster={thumbSrc}
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        className={`reel-video-element ${isPlaying ? 'active' : ''}`}
+      />
+
+      {/* Instagram Reels Badge (Top Right) */}
+      <div className="instagram-reels-badge" title="Instagram Reel">
+        <svg className="reel-icon-svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z" />
+        </svg>
+        <span className="reel-badge-text">REEL</span>
+      </div>
+
+      {/* Pre-visualization Live Status Pill (Top Left, on Hover) */}
+      {isHovered && (
+        <div className="reel-preview-status">
+          <span className="live-dot"></span>
+          <span className="preview-label">PREVIEW</span>
+          <FaVolumeMute className="preview-mute-icon" title="Muted preview" />
+        </div>
+      )}
+
+      {/* Center Play Button on Idle (Instagram Reels Grid Style) */}
+      {!isPlaying && (
+        <div className="reel-center-play-badge">
+          <div className="reel-play-circle">
+            <FaPlay className="reel-play-icon" />
+          </div>
+          <span className="reel-tap-hint">Hover to preview</span>
+        </div>
+      )}
+
+      {/* Instagram-style Bottom Scrim & Info Overlay */}
+      <div className="reel-bottom-scrim">
+        <div className="reel-info">
+          <span className="project-category-tag reel-cat-tag">{project.category}</span>
+          <span className="project-title reel-title">{project.title}</span>
+        </div>
+        <span className="project-action-hint reel-action-hint">
+          <FaInfoCircle /> Click to open full Reel & Details
+        </span>
+      </div>
+    </div>
+  )
+}
 
 const Teste = () => {
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
-
-  // Flat array of all images in the gallery for sequential Lightbox navigation
-  const galleryItems = [
-    { src: 'img2/project1.jpg', title: 'Owl' }, // 0
-    { src: 'img2/project2.png', title: 'Character' }, // 1
-    { src: 'img2/project3.png', title: 'Faith Mirrors Edge' }, // 2
-    { src: 'img2/project4.png', title: 'Empyrean' }, // 3
-    
-    { src: 'img2/project5.png', title: 'Cyberpunk Girl' }, // 4
-    { src: 'img2/project6.png', title: 'Sci-fi Character' }, // 5
-    { src: 'img2/project7.png', title: 'Futuristic Suit' }, // 6
-    { src: 'img2/project8.jpg', title: 'Portrait Sketch' }, // 7
-    
-    { src: 'img2/project9.jpg', title: 'Digital Painting' }, // 8
-    { src: 'img2/project10.png', title: 'Cyber Assassin' }, // 9
-    { src: 'img2/project11.jpg', title: 'Warrior' }, // 10
-    { src: 'img2/project12.png', title: 'Mech Concept' }, // 11
-    
-    { src: 'img2/project13.png', title: 'Abstract Art' }, // 12
-    { src: 'img2/project14.jpg', title: 'Concept Landscape' }, // 13
-    { src: 'img2/project15.jpg', title: '3D Render Interior' }, // 14
-    { src: 'img2/project16.jpg', title: 'Urban Sketch' }, // 15
-    
-    { src: 'img2/project17.jpg', title: 'Fantasy Character' }, // 16
-    { src: 'img2/project18.jpg', title: 'Desert Environment' }, // 17
-    { src: 'img2/project19.jpg', title: 'Rabbit Character' }, // 18
-    { src: 'img2/project20.jpg', title: 'Human Study' }, // 19
-    
-    { src: 'img2/project21.jpg', title: 'Cyberpunk Portrait' }, // 20
-    { src: 'img2/project22.jpg', title: 'Futuristic City' }, // 21
-    { src: 'img2/project24.jpg', title: 'Scifi Portal' }, // 22
-    { src: 'img2/project25.jpg', title: 'Assassin' }, // 23
-    
-    { src: 'img2/project26.jpg', title: 'Mechanical Head' }, // 24
-    { src: 'img2/project27.jpg', title: 'Abstract Sketch' }, // 25
-    { src: 'img2/project28.jpg', title: 'Digital Portrait' }, // 26
-    { src: 'img2/project29.jpg', title: 'Large Scale Environment' }, // 27
-    
-    { src: 'img2/project30.jpg', title: 'Knight Concept' }, // 28
-    { src: 'img2/project31.jpg', title: 'Scifi Warrior' }, // 29
-    { src: 'img2/project32.jpg', title: 'Soldier' }, // 30
-    { src: 'img2/project33.jpg', title: 'Digital Sketch' } // 31
-  ]
-
-  // Columns definition mapping indices of galleryItems
-  const columns = [
-    [0, 1, 2, 3],       // Column 1
-    [4, 5, 6, 7],       // Column 2
-    [8, 9, 10, 11],     // Column 3
-    [12, 13, 14, 15],   // Column 4
-    [16, 17, 18, 19],   // Column 5
-    [20, 21, 22, 23],   // Column 6
-    [24, 25, 26, 27],   // Column 7
-    [28, 29, 30, 31]    // Column 8
-  ]
 
   const openLightbox = (index) => {
     setCurrentIndex(index)
@@ -66,11 +126,11 @@ const Teste = () => {
   }
 
   const handlePrev = () => {
-    setCurrentIndex((prevIndex) => (prevIndex === 0 ? galleryItems.length - 1 : prevIndex - 1))
+    setCurrentIndex((prevIndex) => (prevIndex === 0 ? moreWorkData.length - 1 : prevIndex - 1))
   }
 
   const handleNext = () => {
-    setCurrentIndex((prevIndex) => (prevIndex === galleryItems.length - 1 ? 0 : prevIndex + 1))
+    setCurrentIndex((prevIndex) => (prevIndex === moreWorkData.length - 1 ? 0 : prevIndex + 1))
   }
 
   return (
@@ -78,33 +138,53 @@ const Teste = () => {
       <h1 className="lg-heading">
         More <span className="text-secondary">Work</span>
       </h1>
-      <h2 className="sm-heading">A collection of drawings, 3D assets, and paintings</h2>
+      <h2 className="sm-heading">A collection of drawings, 3D assets, concept sketches, and paintings. Click any image for description.</h2>
 
-      <div className="gallery-row">
-        {columns.map((colIndices, colIdx) => (
-          <div key={colIdx} className="gallery-column">
-            {colIndices.map((itemIdx) => {
-              const item = galleryItems[itemIdx]
-              return (
-                <div 
-                  key={itemIdx} 
-                  className="gallery-item"
-                  onClick={() => openLightbox(itemIdx)}
-                >
-                  <img src={item.src} alt={item.title} loading="lazy" />
-                  <div className="gallery-overlay">
-                    <i className="fas fa-eye"></i>
+      <div className="projects-grid">
+        {moreWorkData.map((project, index) => {
+          const isProjectVideo = isVideo(project.src)
+
+          return (
+            <div 
+              key={project.id || index} 
+              className={`project-item ${isProjectVideo ? 'project-item-reel' : ''}`}
+              onClick={() => openLightbox(index)}
+            >
+              {isProjectVideo ? (
+                <ReelPreview project={project} isLightboxOpen={lightboxOpen} />
+              ) : (
+                <div className="project-image-wrapper">
+                  <img src={project.src} alt={project.title} loading="lazy" />
+                  <div className="project-overlay">
+                    <span className="project-category-tag">{project.category}</span>
+                    <span className="project-title">{project.title}</span>
+                    <span className="project-action-hint">
+                      <FaInfoCircle /> View Description
+                    </span>
                   </div>
                 </div>
-              )
-            })}
-          </div>
-        ))}
+              )}
+
+              <div className="project-footer-link">
+                {isProjectVideo ? (
+                  <>
+                    <FaPlay className="reel-footer-icon" /> {project.title}
+                    <span className="reel-footer-badge">REEL</span>
+                  </>
+                ) : (
+                  <>
+                    <FaEye /> {project.title}
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       <Lightbox
         isOpen={lightboxOpen}
-        images={galleryItems}
+        images={moreWorkData}
         currentIndex={currentIndex}
         onClose={() => setLightboxOpen(false)}
         onPrev={handlePrev}

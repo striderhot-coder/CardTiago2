@@ -1,9 +1,37 @@
-import React, { useEffect } from 'react'
-import { FaTimes, FaChevronLeft, FaChevronRight, FaTag, FaCalendarAlt, FaTools, FaExternalLinkAlt } from 'react-icons/fa'
+import React, { useEffect, useRef, useState } from 'react'
+import { FaTimes, FaChevronLeft, FaChevronRight, FaTag, FaCalendarAlt, FaTools, FaExternalLinkAlt, FaVolumeUp } from 'react-icons/fa'
 
 const isVideo = (src) => /\.(mp4|webm|ogg|mov)$/i.test(src || '')
 
 const Lightbox = ({ isOpen, images, currentIndex, onClose, onPrev, onNext }) => {
+  const videoRef = useRef(null)
+  const [soundBlocked, setSoundBlocked] = useState(false)
+
+  // Reels must start audible. If the browser still refuses unmuted autoplay we
+  // fall back to muted and offer a one-tap "play with sound" button.
+  useEffect(() => {
+    setSoundBlocked(false)
+    const v = videoRef.current
+    if (!isOpen || !v) return
+    v.muted = false
+    v.volume = 1
+    const attempt = v.play()
+    if (attempt && typeof attempt.catch === 'function') {
+      attempt.catch(() => {
+        v.muted = true
+        v.play().then(() => setSoundBlocked(true)).catch(() => {})
+      })
+    }
+  }, [isOpen, currentIndex])
+
+  const enableSound = () => {
+    const v = videoRef.current
+    if (!v) return
+    v.muted = false
+    v.volume = 1
+    v.play().then(() => setSoundBlocked(false)).catch(() => {})
+  }
+
   useEffect(() => {
     if (!isOpen) return
 
@@ -63,12 +91,18 @@ const Lightbox = ({ isOpen, images, currentIndex, onClose, onPrev, onNext }) => 
         <div className="lightbox-grid">
           {/* Media Container */}
           <div className="lightbox-media-wrapper">
+            {isVideo(mediaSrc) && soundBlocked && (
+              <button className="lightbox-unmute-btn" onClick={enableSound}>
+                <FaVolumeUp /> Play with sound
+              </button>
+            )}
             {isVideo(mediaSrc) ? (
               <video
                 key={mediaSrc}
+                ref={videoRef}
                 src={mediaSrc}
+                poster={item.thumbnail || (isVideo(mediaSrc) ? 'img2/jellyfish-thumb.jpg' : undefined)}
                 controls
-                autoPlay
                 playsInline
                 className="lightbox-media"
               >

@@ -28,7 +28,7 @@ export const projectsData = [
   },
   {
     id: 'project-2',
-    title: 'Portrait Study',
+    title: 'Soldier',
     category: 'Digital Illustration',
     src: 'ace.png',
     description: 'Detailed character portrait study focusing on facial proportion, ambient lighting, and subtle skin texture rendering.',
@@ -37,7 +37,7 @@ export const projectsData = [
   },
   {
     id: 'project-3',
-    title: 'Time Up',
+    title: 'Jump',
     category: 'Concept Art',
     src: 'acf.png',
     description: 'Conceptual illustration featuring surreal time symbolism, hourglass motifs, and dramatic visual lighting.',
@@ -46,8 +46,8 @@ export const projectsData = [
   },
   {
     id: 'project-4',
-    title: 'Electrojad Branding',
-    category: 'Graphic Design',
+    title: 'Landscape',
+    category: 'Digital Illustration',
     src: 'acg.png',
     description: 'Brand identity design and visual asset creation for Electrojad, combining futuristic typography with clean geometric icon design.',
     year: '2022',
@@ -64,7 +64,7 @@ export const projectsData = [
   },
   {
     id: 'project-6',
-    title: 'Character Sketch',
+    title: 'Converging Realites',
     category: 'Illustration',
     src: 'acj.png',
     description: 'Character portrait sketch exploring texture rendering, facial form, and high-contrast digital brush textures.',
@@ -73,8 +73,8 @@ export const projectsData = [
   },
   {
     id: 'project-7',
-    title: 'Digital Composition',
-    category: 'Fine Art',
+    title: 'Personal Card',
+    category: 'Packaging & Graphic Design',
     src: 'acx.png',
     description: 'Abstract digital composition exploring fluid colors, organic motion, and layered lighting textures.',
     year: '2023',
@@ -82,8 +82,8 @@ export const projectsData = [
   },
   {
     id: 'project-8',
-    title: 'Landscape Illustration',
-    category: 'Environment Art',
+    title: 'Selfie',
+    category: 'Photography & Digital Art',
     src: 'adv.png',
     description: 'Atmospheric environmental landscape artwork featuring warm atmospheric lighting and silhouetted terrain.',
     year: '2023',
@@ -145,7 +145,7 @@ export const projectsData = [
   },
   {
     id: 'project-15',
-    title: 'Cyberpunk Portrait',
+    title: 'Portrait of a woman',
     category: 'Concept Art',
     src: 'img/projects/project21.jpg',
     description: 'Sci-fi cyberpunk character portrait featuring glowing cybernetic enhancements, futuristic collar, and neon atmospheric backlight.',

@@ -100,12 +100,12 @@ const Home = () => {
               <FaDownload /> Download CV
             </a>
             <a
-              href="https://www.etsy.com/shop/DigityOne"
+              href="https://digityone1.vercel.app/"
               target="_blank"
               rel="noopener noreferrer"
               className="btn-secondary"
             >
-              <FaShoppingBag /> Visit Etsy Shop
+              <FaShoppingBag /> Visit Digityone Shop
             </a>
             <Link to="/work" className="btn-outline">
               Explore Portfolio

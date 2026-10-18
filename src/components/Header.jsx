@@ -68,6 +68,11 @@ const Header = () => {
           </NavLink>
         </li>
         <li>
+          <NavLink to="/cosmic-invoice" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            Cosmic Invoice
+          </NavLink>
+        </li>
+        <li>
           <NavLink to="/universe" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             Scenario & Cards
           </NavLink>
