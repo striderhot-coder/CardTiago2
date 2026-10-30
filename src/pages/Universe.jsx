@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { scenarioData, charactersData, cardsData } from '../data/universeData'
+import HearthstoneCard3D from '../components/HearthstoneCard3D'
 import { 
   FaBookOpen, 
   FaUsers, 
@@ -334,84 +335,33 @@ const Universe = () => {
           </div>
 
           {/* Cards Showcase Grid */}
-          <div className="cards-grid">
+          <div className="cards-grid" style={{ perspective: '1200px' }}>
             {filteredCards.length > 0 ? (
               filteredCards.map(card => {
                 const isFlipped = flippedCards[card.id]
-                const rarityClass = `rarity-${card.rarity.toLowerCase()}`
 
                 return (
-                  <div 
-                    key={card.id} 
-                    className={`trading-card-wrapper ${rarityClass}`}
-                    onClick={() => setSelectedCard(card)}
-                  >
-                    <div className={`trading-card ${isFlipped ? 'flipped' : ''}`}>
-                      {/* FRONT FACE */}
-                      <div className="card-face card-front">
-                        <div className="card-top-bar">
-                          <span className="card-cost" title="Mana Cost">{card.cost}</span>
-                          <span className="card-name-title">{card.name}</span>
-                          <span className={`card-rarity-badge ${rarityClass}`}>{card.rarity}</span>
-                        </div>
-
-                        <div className="card-art-frame">
-                          <img src={card.src} alt={card.name} loading="lazy" />
-                          <span className="card-type-tag">{card.type} • {card.faction}</span>
-                        </div>
-
-                        <div className="card-ability-box">
-                          <p>{card.ability}</p>
-                        </div>
-
-                        <div className="card-bottom-bar">
-                          {card.attack > 0 ? (
-                            <span className="card-stat card-attack" title="Attack Power">
-                              <FaBolt /> {card.attack}
-                            </span>
-                          ) : <span className="card-stat-empty"></span>}
-
-                          <button 
-                            className="card-flip-btn"
-                            onClick={(e) => toggleCardFlip(card.id, e)}
-                            title="Flip Card for Lore"
-                          >
-                            <FaRedo /> Lore
-                          </button>
-
-                          {card.health > 0 ? (
-                            <span className="card-stat card-health" title="Health/Durability">
-                              <FaShieldAlt /> {card.health}
-                            </span>
-                          ) : <span className="card-stat-empty"></span>}
-                        </div>
-                      </div>
-
-                      {/* BACK FACE */}
-                      <div className="card-face card-back">
-                        <div className="card-back-pattern">
-                          <div className="card-back-logo">CR</div>
-                          <h3>{card.name}</h3>
-                          <div className="card-back-id">{card.id}</div>
-                          
-                          <div className="card-lore-content">
-                            <h4>Lore & Backstory</h4>
-                            <p className="lore-text">{card.lore}</p>
-                            
-                            {card.flavor && (
-                              <p className="flavor-quote">"{card.flavor}"</p>
-                            )}
-                          </div>
-
-                          <button 
-                            className="card-flip-btn back-btn"
-                            onClick={(e) => toggleCardFlip(card.id, e)}
-                          >
-                            <FaRedo /> Front View
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                  <div key={card.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '0.5rem' }}>
+                    <HearthstoneCard3D
+                      card={card}
+                      showBack={isFlipped}
+                      onFlip={(e) => {
+                        if (e) e.stopPropagation()
+                        toggleCardFlip(card.id, e)
+                      }}
+                      onClick={() => setSelectedCard(card)}
+                    />
+                    <button 
+                      className="card-flip-btn"
+                      style={{ marginTop: '0.8rem' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleCardFlip(card.id, e)
+                      }}
+                      title="Flip Card for Lore"
+                    >
+                      <FaRedo /> {isFlipped ? 'Front View' : 'Lore / Back'}
+                    </button>
                   </div>
                 )
               })
@@ -495,8 +445,8 @@ const Universe = () => {
               <FaTimes />
             </button>
             <div className="card-modal-flex">
-              <div className={`inspect-card-display rarity-${selectedCard.rarity.toLowerCase()}`}>
-                <img src={selectedCard.src} alt={selectedCard.name} />
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '1rem' }}>
+                <HearthstoneCard3D card={selectedCard} isPlayable={true} />
               </div>
               <div className="card-modal-details">
                 <div className="card-modal-header">

@@ -4,6 +4,8 @@ import { cardsData } from '../data/universeData'
 import { galleryCards } from '../data/galleryCards'
 import { spellCards, legacySpellEffects } from '../data/spellCards'
 import { playSFX, gameMusic } from '../audio/gameAudio'
+import HearthstoneCard3D from '../components/HearthstoneCard3D'
+import HearthstoneMinion3D from '../components/HearthstoneMinion3D'
 import { 
   FaGamepad, 
   FaShieldAlt, 
@@ -36,7 +38,8 @@ import {
   FaRandom,
   FaMusic,
   FaSignOutAlt,
-  FaStar
+  FaStar,
+  FaCube
 } from 'react-icons/fa'
 
 // Deck = the hand-authored Converging Reality cards, every artwork in the Work,
@@ -349,6 +352,8 @@ const CardGame = () => {
   const [winner, setWinner] = useState(null)
 
   // Visual Effects & Animations state
+  const [is3DView, setIs3DView] = useState(true)
+  const [shockwaves, setShockwaves] = useState([])
   const [attackingId, setAttackingId] = useState(null)
   const [impactId, setImpactId] = useState(null)
   const [screenShake, setScreenShake] = useState(false)
@@ -1427,6 +1432,11 @@ const CardGame = () => {
         isJustSummoned: true
       }
 
+      // 3D Card Slam Shockwave
+      const swId = `sw-${Date.now()}-${Math.random()}`
+      setShockwaves(prev => [...prev, { id: swId }])
+      setTimeout(() => setShockwaves(prev => prev.filter(s => s.id !== swId)), 700)
+
       if (isP1) setP1Board(prev => [...prev, newUnit])
       else setP2Board(prev => [...prev, newUnit])
 
@@ -1446,6 +1456,10 @@ const CardGame = () => {
         readyToAttack: false,
         isJustSummoned: true
       }
+      const swId = `sw-${Date.now()}-${Math.random()}`
+      setShockwaves(prev => [...prev, { id: swId }])
+      setTimeout(() => setShockwaves(prev => prev.filter(s => s.id !== swId)), 700)
+
       if (isP1) setP1Board(prev => [...prev, realmUnit])
       else setP2Board(prev => [...prev, realmUnit])
       addLog(`🏰 ${activePlayerName} deployed ${card.name}.`)
@@ -2092,8 +2106,13 @@ const CardGame = () => {
       {/* PLAYING STATE                                                             */}
       {/* ========================================================================= */}
       {gameMode === 'playing' && (
-        <div ref={arenaRef} className={`battle-arena ${screenShake ? 'screen-shake' : ''}`}>
+        <div ref={arenaRef} className={`battle-arena ${is3DView ? 'hearthstone-3d-perspective' : ''} ${screenShake ? 'screen-shake' : ''}`}>
           
+          {/* HEARTHSTONE SLAM SHOCKWAVES */}
+          {shockwaves.map(sw => (
+            <div key={sw.id} className="hs-slam-shockwave-ring" />
+          ))}
+
           {/* HEARTHSTONE TARGETING ARROW CANVAS */}
           {dragState && dragState.isDragging && (
             <svg className="hs-targeting-canvas">
@@ -2192,6 +2211,14 @@ const CardGame = () => {
             </div>
 
             <div className="arena-top-actions">
+              <button 
+                className={`toggle-3d-btn ${is3DView ? 'active-3d' : ''}`}
+                onClick={() => setIs3DView(!is3DView)}
+                title="Toggle 3D Hearthstone Perspective"
+              >
+                <FaCube /> {is3DView ? '3D Arena' : '2D View'}
+              </button>
+
               <button className="toggle-sfx-btn arena-exit-btn" onClick={() => setGameMode('menu')} title="Leave the match and return to the game menu">
                 <FaSignOutAlt /> Exit
               </button>
@@ -2248,8 +2275,12 @@ const CardGame = () => {
 
             <div className="hs-hero-details">
               <div className="hs-hero-name">{oppHeroTitle}</div>
-              <div className="hs-hero-power-btn disabled">
-                <FaBolt className="power-icon" /> Hero Power (2)
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                <div className="hs-hero-power-coin-btn disabled" title="Opponent Hero Power">
+                  <FaBolt className="hs-power-coin-icon" />
+                  <span className="hs-power-cost-badge">2</span>
+                </div>
+                <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 600 }}>Hero Power</span>
               </div>
             </div>
 
@@ -2273,34 +2304,26 @@ const CardGame = () => {
                   const isAttacking = attackingId === unit.instanceId
                   const isImpacted = impactId === unit.instanceId
                   const isDying = dyingIds.includes(unit.instanceId)
+                  const isTargetable = selectedAttacker || (dragState && dragState.type === 'attack')
+                  const isSpellTargeted = isSpellTarget(oppPlayerTag, unit)
 
                   return (
-                    <div 
-                      key={unit.instanceId} 
-                      data-unit-id={unit.instanceId}
-                      data-owner={oppPlayerTag}
-                      className={`board-unit-card enemy-unit ${selectedAttacker || (dragState && dragState.type === 'attack') ? 'targetable' : ''} ${isSpellTarget(oppPlayerTag, unit) ? 'spell-target' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-down' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
-                      onClick={() => handleAttackOpponentUnit(unit, oppPlayerTag)}
-                    >
+                    <div key={unit.instanceId} style={{ position: 'relative' }}>
                       {floatingDmg.filter(p => p.targetId === unit.instanceId).map(p => (
                         <div key={p.id} className={`floating-dmg-popup ${p.type}`}>{p.text}</div>
                       ))}
-
-                      {unit.hasTaunt && <span className="taunt-badge">🛡️ Taunt</span>}
-                      <img src={unit.card.src} alt={unit.card.name} />
-                      <div className="unit-name">{unit.card.name}</div>
-                      <div className="unit-stats">
-                        <span className="atk"><FaBolt /> {unit.attack}</span>
-                        <span className="hp"><FaShieldAlt /> {unit.currentHp}/{unit.maxHp}</span>
-                        <button
-                          className="unit-inspect-btn"
-                          aria-label={`Inspect ${unit.card.name}`}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); inspectUnit(unit, oppPlayerTag) }}
-                        >
-                          <FaInfoCircle />
-                        </button>
-                      </div>
+                      <HearthstoneMinion3D
+                        unit={unit}
+                        owner={oppPlayerTag}
+                        isPlayerTurn={turn === oppPlayerTag}
+                        isTargetable={isTargetable}
+                        isSpellTarget={isSpellTargeted}
+                        isAttacking={isAttacking}
+                        isImpacted={isImpacted}
+                        isDying={isDying}
+                        onClick={() => handleAttackOpponentUnit(unit, oppPlayerTag)}
+                        onInspect={() => inspectUnit(unit, oppPlayerTag)}
+                      />
                     </div>
                   )
                 })
@@ -2334,7 +2357,7 @@ const CardGame = () => {
 
           {/* YOUR BOARD */}
           <div className="board-row player-board-row">
-            <div className="board-label">Your Battlefield ({myBoard.length}) - Tap a ready unit, then tap a target to attack!</div>
+            <div className="board-label">Your Battlefield ({myBoard.length}) - Tap a ready unit or drag to attack!</div>
             <div className="board-cards-container">
               {myBoard.length > 0 ? (
                 myBoard.map(unit => {
@@ -2342,41 +2365,31 @@ const CardGame = () => {
                   const isAttacking = attackingId === unit.instanceId
                   const isImpacted = impactId === unit.instanceId
                   const isDying = dyingIds.includes(unit.instanceId)
+                  const isSpellTargeted = isSpellTarget(myPlayerTag, unit)
 
                   return (
-                    <div 
-                      key={unit.instanceId} 
-                      data-unit-id={unit.instanceId}
-                      data-owner={myPlayerTag}
-                      className={`board-unit-card player-unit ${unit.readyToAttack ? 'ready drag-targetable' : 'exhausted'} ${isSelected ? 'selected' : ''} ${isSpellTarget(myPlayerTag, unit) ? 'spell-target' : ''} ${unit.hasTaunt ? 'taunt-unit' : ''} ${isAttacking ? 'attacking-lunge-up' : ''} ${isImpacted ? 'impact-shake' : ''} ${isDying ? 'disintegrating' : ''}`}
-                      onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
-                      onClick={() => handleSelectAttacker(unit, myPlayerTag)}
-                    >
+                    <div key={unit.instanceId} style={{ position: 'relative' }}>
                       {floatingDmg.filter(p => p.targetId === unit.instanceId).map(p => (
                         <div key={p.id} className={`floating-dmg-popup ${p.type}`}>{p.text}</div>
                       ))}
-
-                      {unit.hasTaunt && <span className="taunt-badge">🛡️ Taunt</span>}
-                      {unit.readyToAttack && <span className="ready-indicator">✨ Ready</span>}
-                      <img src={unit.card.src} alt={unit.card.name} />
-                      <div className="unit-name">{unit.card.name}</div>
-                      <div className="unit-stats">
-                        <span className="atk"><FaBolt /> {unit.attack}</span>
-                        <span className="hp"><FaShieldAlt /> {unit.currentHp}/{unit.maxHp}</span>
-                        <button
-                          className="unit-inspect-btn"
-                          aria-label={`Inspect ${unit.card.name}`}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); inspectUnit(unit, myPlayerTag) }}
-                        >
-                          <FaInfoCircle />
-                        </button>
-                      </div>
+                      <HearthstoneMinion3D
+                        unit={unit}
+                        owner={myPlayerTag}
+                        isPlayerTurn={isMyTurn}
+                        isSelected={isSelected}
+                        isSpellTarget={isSpellTargeted}
+                        isAttacking={isAttacking}
+                        isImpacted={isImpacted}
+                        isDying={isDying}
+                        onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
+                        onClick={() => handleSelectAttacker(unit, myPlayerTag)}
+                        onInspect={() => inspectUnit(unit, myPlayerTag)}
+                      />
                     </div>
                   )
                 })
               ) : (
-                <div className="empty-board-slot">Your Battlefield is empty. Tap cards in your hand to play them!</div>
+                <div className="empty-board-slot">Your Battlefield is empty. Tap or drag cards from your hand to play!</div>
               )}
             </div>
           </div>
@@ -2403,12 +2416,19 @@ const CardGame = () => {
 
             <div className="hs-hero-details">
               <div className="hs-hero-name">{myHeroTitle}</div>
-              <button 
-                className={`hs-hero-power-btn ${myMana >= 2 && isMyTurn ? 'usable' : 'disabled'}`}
-                onClick={() => handleUseHeroPower(myPlayerTag)}
-              >
-                <FaBolt className="power-icon" /> Hero Power: Astral Flare (2)
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                <button 
+                  className={`hs-hero-power-coin-btn ${myMana >= 2 && isMyTurn ? 'usable' : 'disabled'}`}
+                  onClick={() => handleUseHeroPower(myPlayerTag)}
+                  title="Hero Power: Deal 2 direct damage (2 Mana)"
+                >
+                  <FaBolt className="hs-power-coin-icon" />
+                  <span className="hs-power-cost-badge">2</span>
+                </button>
+                <span style={{ fontSize: '0.85rem', color: '#fbbf24', fontWeight: 700 }}>
+                  Hero Power: Astral Flare (2)
+                </span>
+              </div>
             </div>
 
             {/* Mana Crystals */}
@@ -2425,7 +2445,7 @@ const CardGame = () => {
           {/* YOUR HAND CARDS */}
           <div className="player-hand-section">
             <div className="hand-title">
-              Your Hand ({myHand.length}) {hideHand ? '- [HIDDEN FOR PASS & PLAY]' : '- Tap a card to play it!'}
+              Your Hand ({myHand.length}) {hideHand ? '- [HIDDEN FOR PASS & PLAY]' : '- Hover to tilt in 3D & drag onto battlefield to summon!'}
             </div>
 
             {hideHand ? (
@@ -2437,16 +2457,22 @@ const CardGame = () => {
                 </button>
               </div>
             ) : (
-              <div className="player-hand-grid">
-                {myHand.map(card => {
+              <div className="player-hand-grid hs-fanned-hand">
+                {myHand.map((card, idx) => {
                   const canAfford = myMana >= card.cost && isMyTurn
-                  const rarityClass = `rarity-${card.rarity.toLowerCase()}`
+                  const isDraggingThis = dragState && dragState.isDragging && dragState.item && dragState.item.instanceId === card.instanceId
                   const keywords = cardKeywords(card)
 
                   return (
-                    <div 
-                      key={card.instanceId} 
-                      className={`hand-card ${rarityClass} ${canAfford ? 'playable hs-glow draggable-hand-card' : 'unplayable'}`}
+                    <HearthstoneCard3D
+                      key={card.instanceId}
+                      card={card}
+                      keywords={keywords}
+                      isPlayable={canAfford}
+                      isFanned={true}
+                      fanIndex={idx}
+                      fanTotal={myHand.length}
+                      isDragging={isDraggingThis}
                       onPointerDown={(e) => canAfford && handleStartDragHandCard(e, card)}
                       onClick={() => {
                         if (suppressClickRef.current) {
@@ -2455,34 +2481,7 @@ const CardGame = () => {
                         }
                         handleCardPreview(card)
                       }}
-                    >
-                      <div className="hand-card-top">
-                        <span className="hand-card-cost">{card.cost}</span>
-                        <span className="hand-card-name">{card.name}</span>
-                      </div>
-
-                      <div className="hand-card-art">
-                        <img src={card.src} alt={card.name} />
-                        <span className="hand-card-type">{card.type}</span>
-                      </div>
-
-                      <div className="hand-card-ability">
-                        {keywords.length > 0 && (
-                          <span className="keyword-chips">
-                            {keywords.map(k => (
-                              <span key={k.id} className={`keyword-chip ${k.id}`}>{k.label}</span>
-                            ))}
-                          </span>
-                        )}
-                        {/* The chips above already name the keyword, so drop the prefix from the face text */}
-                        {(card.ability || '').replace(KEYWORD_PREFIX, '').trim()}
-                      </div>
-
-                      <div className="hand-card-bottom">
-                        {card.attack > 0 ? <span className="hand-stat atk"><FaBolt /> {card.attack}</span> : <span></span>}
-                        {card.health > 0 ? <span className="hand-stat hp"><FaShieldAlt /> {card.health}</span> : <span></span>}
-                      </div>
-                    </div>
+                    />
                   )
                 })}
               </div>

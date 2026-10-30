@@ -5724,3 +5724,871 @@ body {
 
 
 
+
+
+/* ========================================================================= */
+/* HEARTHSTONE AUTHENTIC 3D COMBAT & CARD EFFECTS                            */
+/* ========================================================================= */
+
+/* --- 3D ARENA TABLETOP PERSPECTIVE --- */
+.battle-arena.hearthstone-3d-perspective {
+  perspective: 1400px;
+  background: radial-gradient(circle at 50% 40%, #1e293b 0%, #0f172a 70%, #070d18 100%);
+  border: 4px solid #334155;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.8), inset 0 0 80px rgba(0, 0, 0, 0.9);
+  position: relative;
+  overflow: hidden;
+}
+
+.battle-arena.hearthstone-3d-perspective::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: 
+    radial-gradient(ellipse at 50% 50%, rgba(245, 158, 11, 0.05) 0%, transparent 60%),
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+  pointer-events: none;
+}
+
+.battle-arena.hearthstone-3d-perspective .board-row {
+  transform: rotateX(10deg);
+  transform-style: preserve-3d;
+  background: rgba(15, 23, 42, 0.65);
+  border: 2px solid rgba(245, 158, 11, 0.2);
+  box-shadow: inset 0 4px 20px rgba(0, 0, 0, 0.6), 0 10px 25px rgba(0, 0, 0, 0.4);
+}
+
+.battle-arena.hearthstone-3d-perspective .enemy-board-row {
+  transform: rotateX(12deg) translateZ(-15px);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.battle-arena.hearthstone-3d-perspective .player-board-row {
+  transform: rotateX(8deg) translateZ(10px);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+/* 3D View Toggle Button */
+.toggle-3d-btn {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.3));
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.toggle-3d-btn.active-3d {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #0f172a;
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.6);
+}
+
+/* --- HEARTHSTONE 3D HAND CARDS (PARALLAX & FOIL) --- */
+.player-hand-grid.hs-fanned-hand {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  height: 250px;
+  padding: 1.5rem 2rem 0.5rem;
+  overflow: visible;
+  perspective: 1200px;
+}
+
+.hs-card-3d-wrapper {
+  position: relative;
+  width: 155px;
+  height: 225px;
+  transform-style: preserve-3d;
+  cursor: grab;
+  user-select: none;
+  transition: transform 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.2s ease;
+  margin: 0 -15px; /* Overlap cards like in Hearthstone */
+}
+
+.hs-card-3d-wrapper:active {
+  cursor: grabbing;
+}
+
+.hs-card-3d-wrapper.hs-dragging {
+  opacity: 0.3;
+}
+
+.hs-card-3d-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  border-radius: 14px;
+}
+
+.hs-card-3d-inner.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.hs-card-face {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  border-radius: 14px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform-style: preserve-3d;
+  overflow: hidden;
+  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.65), 0 5px 12px rgba(0, 0, 0, 0.45);
+}
+
+/* FRONT FACE OF CARD */
+.hs-card-front {
+  background: #1e293b;
+  border: 3px solid #64748b;
+}
+
+/* RARITY BORDERS */
+.rarity-legendary .hs-card-front,
+.rarity-mythic .hs-card-front {
+  border-color: #f59e0b;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7), 0 0 15px rgba(245, 158, 11, 0.4);
+}
+
+.rarity-epic .hs-card-front {
+  border-color: #a855f7;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7), 0 0 15px rgba(168, 85, 247, 0.4);
+}
+
+.rarity-rare .hs-card-front {
+  border-color: #06b6d4;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7), 0 0 12px rgba(6, 182, 212, 0.4);
+}
+
+/* PLAYABLE HEARTHSTONE GLOW AURA */
+.hs-card-playable-aura {
+  position: absolute;
+  top: -8px; left: -8px; right: -8px; bottom: -8px;
+  border-radius: 20px;
+  border: 3px solid #10b981;
+  box-shadow: 0 0 20px #10b981, inset 0 0 15px rgba(16, 185, 129, 0.4);
+  animation: hsPlayablePulse 1.6s infinite alternate;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.hs-card-playable-aura.legendary-aura {
+  border-color: #f59e0b;
+  box-shadow: 0 0 25px #f59e0b, inset 0 0 18px rgba(245, 158, 11, 0.5);
+}
+
+@keyframes hsPlayablePulse {
+  0% { transform: scale(0.98); opacity: 0.7; }
+  100% { transform: scale(1.02); opacity: 1; filter: brightness(1.2); }
+}
+
+/* LEGENDARY DRAGON CROWN */
+.hs-legendary-dragon-crest {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%) translateZ(16px);
+  color: #f59e0b;
+  font-size: 1.4rem;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.9));
+  z-index: 10;
+}
+
+/* CARD FRAME STRUCTURE */
+.hs-card-frame-outer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  transform-style: preserve-3d;
+}
+
+/* PORTRAIT ARTWORK WINDOW */
+.hs-card-portrait-window {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  overflow: hidden;
+  background: #000;
+  transform: translateZ(5px);
+  border-bottom: 2px solid rgba(0, 0, 0, 0.6);
+}
+
+.hs-card-portrait-window.hs-spell-window {
+  border-radius: 8px 8px 50% 50%;
+  border-bottom: 3px solid #38bdf8;
+}
+
+.hs-portrait-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 25%;
+}
+
+.hs-portrait-inner-shadow {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+/* 3D MANA CRYSTAL BADGE */
+.hs-mana-crystal-badge {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  transform: translateZ(28px);
+  z-index: 15;
+}
+
+.mana-gem-shape {
+  width: 34px;
+  height: 34px;
+  background: radial-gradient(circle at 35% 35%, #93c5fd 0%, #3b82f6 50%, #1d4ed8 100%);
+  border: 2px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.7), inset 0 2px 4px rgba(255, 255, 255, 0.8), 0 0 10px rgba(59, 130, 246, 0.8);
+}
+
+.mana-number {
+  transform: rotate(45deg);
+  color: #fff;
+  font-weight: 900;
+  font-size: 1.15rem;
+  text-shadow: 0 2px 4px #000, 0 0 8px #1d4ed8;
+}
+
+/* 3D NAME RIBBON BANNER */
+.hs-name-ribbon {
+  position: absolute;
+  top: 96px;
+  left: 6px;
+  right: 6px;
+  height: 24px;
+  background: linear-gradient(180deg, #334155 0%, #0f172a 100%);
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateZ(18px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.8);
+  z-index: 12;
+}
+
+.hs-card-title {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 0.5rem;
+  text-shadow: 0 1px 3px #000;
+}
+
+/* RARITY GEM CREST */
+.hs-rarity-gem-crest {
+  position: absolute;
+  top: 114px;
+  left: 50%;
+  transform: translateX(-50%) translateZ(22px);
+  z-index: 14;
+}
+
+.rarity-gem-facet {
+  width: 14px;
+  height: 14px;
+  transform: rotate(45deg);
+  border: 1px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.hs-rarity-gem-crest.rarity-legendary .rarity-gem-facet,
+.hs-rarity-gem-crest.rarity-mythic .rarity-gem-facet {
+  background: radial-gradient(circle, #f59e0b, #b45309);
+  box-shadow: 0 0 8px #f59e0b;
+}
+
+.hs-rarity-gem-crest.rarity-epic .rarity-gem-facet {
+  background: radial-gradient(circle, #c084fc, #7e22ce);
+  box-shadow: 0 0 8px #a855f7;
+}
+
+.hs-rarity-gem-crest.rarity-rare .rarity-gem-facet {
+  background: radial-gradient(circle, #67e8f9, #0891b2);
+  box-shadow: 0 0 8px #06b6d4;
+}
+
+.hs-rarity-gem-crest.rarity-common .rarity-gem-facet {
+  background: #94a3b8;
+}
+
+/* CARD TEXT PARCHMENT BOX */
+.hs-card-text-parchment {
+  flex: 1;
+  background: #0b1120;
+  margin: 14px 6px 6px 6px;
+  border-radius: 8px;
+  padding: 0.8rem 0.5rem 0.4rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transform: translateZ(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hs-card-ability-desc {
+  font-size: 0.68rem;
+  color: #e2e8f0;
+  line-height: 1.25;
+  text-align: center;
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.hs-card-type-label {
+  font-size: 0.6rem;
+  color: #94a3b8;
+  text-align: center;
+  font-style: italic;
+  margin-top: 0.2rem;
+}
+
+/* 3D ATTACK & HEALTH BADGES (CARD) */
+.hs-stat-badge {
+  position: absolute;
+  bottom: -4px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateZ(28px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8);
+  z-index: 15;
+}
+
+.hs-attack-badge {
+  left: -4px;
+  background: radial-gradient(circle at 35% 35%, #fbbf24 0%, #d97706 60%, #78350f 100%);
+  border: 2px solid #fef08a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8), 0 0 10px rgba(245, 158, 11, 0.6);
+}
+
+.hs-health-badge {
+  right: -4px;
+  background: radial-gradient(circle at 35% 35%, #f87171 0%, #dc2626 60%, #7f1d1d 100%);
+  border: 2px solid #fee2e2;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8), 0 0 10px rgba(239, 68, 68, 0.6);
+}
+
+.hs-stat-badge .stat-value {
+  color: #fff;
+  font-weight: 900;
+  font-size: 1.25rem;
+  text-shadow: 0 2px 4px #000, 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
+/* SPECULAR FOIL GLARE OVERLAY */
+.hs-specular-foil-glare {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  transform: translateZ(32px);
+  pointer-events: none;
+  border-radius: 14px;
+  transition: opacity 0.2s ease;
+  mix-blend-mode: overlay;
+  z-index: 20;
+}
+
+/* HOLOGRAPHIC PRISMATIC RAINBOW SHEEN */
+.hs-holo-prismatic-sheen {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  transform: translateZ(30px);
+  pointer-events: none;
+  border-radius: 14px;
+  background: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgba(255, 0, 150, 0.25) 35%,
+    rgba(0, 255, 255, 0.3) 50%,
+    rgba(255, 230, 0, 0.25) 65%,
+    transparent 80%
+  );
+  background-size: 250% 250%;
+  transition: opacity 0.2s ease, background-position 0.1s ease;
+  mix-blend-mode: color-dodge;
+  z-index: 19;
+}
+
+/* BACK FACE OF CARD (RUNIC BACK) */
+.hs-card-back {
+  background: #0f172a;
+  border: 3px solid #3b82f6;
+  transform: rotateY(180deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.hs-card-back-pattern {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.hs-card-back-rune-core {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 3px solid #60a5fa;
+  background: radial-gradient(circle, #3b82f6, #1e3a8a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 15px #3b82f6;
+}
+
+.rune-gem {
+  width: 18px;
+  height: 18px;
+  transform: rotate(45deg);
+  background: #93c5fd;
+  border: 1px solid #fff;
+}
+
+.hs-card-back-title {
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: #fff;
+}
+
+.hs-card-back-lore {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.hs-back-flip-btn {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ========================================================================= */
+/* HEARTHSTONE 3D MINION MEDALLIONS ON BATTLEFIELD                           */
+/* ========================================================================= */
+
+.hs-minion-3d-wrapper {
+  position: relative;
+  width: 105px;
+  height: 135px;
+  cursor: pointer;
+  user-select: none;
+  transform-style: preserve-3d;
+  transition: transform 0.15s ease-out, filter 0.2s ease;
+  margin: 0.4rem;
+}
+
+/* OVAL FRAME */
+.hs-minion-oval-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50% 50% 48% 48%;
+  background: #0f172a;
+  border: 4px solid #b45309;
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.75), inset 0 0 15px rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+  transform-style: preserve-3d;
+}
+
+.hs-minion-portrait-mask {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.hs-minion-portrait-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+}
+
+.hs-minion-oval-specular {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.25) 0%, transparent 45%);
+  pointer-events: none;
+}
+
+/* TAUNT CARVED STONE SHIELD WINGS */
+.hs-minion-taunt-shield-wings {
+  position: absolute;
+  top: -8px; left: -12px; right: -12px; bottom: -8px;
+  border: 4px solid #94a3b8;
+  border-radius: 50% 50% 45% 45%;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.9), inset 0 0 12px rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  z-index: 4;
+  animation: tauntStonePulse 3s infinite alternate;
+}
+
+.hs-minion-taunt-shield-wings::before,
+.hs-minion-taunt-shield-wings::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 30px;
+  background: #64748b;
+  border: 2px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+.hs-minion-taunt-shield-wings::before { left: -8px; }
+.hs-minion-taunt-shield-wings::after { right: -8px; }
+
+@keyframes tauntStonePulse {
+  0% { filter: drop-shadow(0 0 4px #94a3b8); }
+  100% { filter: drop-shadow(0 0 12px #e2e8f0); }
+}
+
+/* READY ELECTRIC MANA FLAME */
+.hs-minion-ready-flame-aura {
+  position: absolute;
+  top: -6px; left: -6px; right: -6px; bottom: -6px;
+  border-radius: 50% 50% 48% 48%;
+  border: 3px solid #10b981;
+  box-shadow: 0 0 20px #10b981, inset 0 0 12px #10b981;
+  animation: hsMinionFlamePulse 1.4s infinite alternate;
+  pointer-events: none;
+  z-index: 5;
+}
+
+@keyframes hsMinionFlamePulse {
+  0% { transform: scale(0.97); opacity: 0.7; }
+  100% { transform: scale(1.04); opacity: 1; filter: brightness(1.3); }
+}
+
+/* SLEEPING ZZZ RUNES */
+.hs-minion-sleeping-glyph {
+  position: absolute;
+  top: -15px;
+  right: -5px;
+  display: flex;
+  gap: 2px;
+  font-family: cursive, sans-serif;
+  font-weight: 900;
+  color: #93c5fd;
+  text-shadow: 0 0 8px #3b82f6;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.z-glyph {
+  animation: zFloat 1.8s infinite ease-in-out;
+}
+.z-1 { font-size: 0.8rem; animation-delay: 0s; }
+.z-2 { font-size: 1rem; animation-delay: 0.3s; }
+.z-3 { font-size: 1.25rem; animation-delay: 0.6s; }
+
+@keyframes zFloat {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  50% { opacity: 1; }
+  100% { opacity: 0; transform: translate(10px, -20px) scale(1.2); }
+}
+
+/* SPELL TARGET AURA ON MINION */
+.hs-minion-spell-target-ring {
+  position: absolute;
+  top: -8px; left: -8px; right: -8px; bottom: -8px;
+  border-radius: 50% 50% 48% 48%;
+  border: 3px dashed #38bdf8;
+  box-shadow: 0 0 22px rgba(56, 189, 248, 0.9), inset 0 0 15px rgba(56, 189, 248, 0.5);
+  animation: spellTargetPulseRing 1.2s infinite alternate;
+  pointer-events: none;
+  z-index: 6;
+}
+
+@keyframes spellTargetPulseRing {
+  0% { transform: scale(0.98); opacity: 0.7; }
+  100% { transform: scale(1.05); opacity: 1; filter: brightness(1.3); }
+}
+
+/* MINION TITLE HOVER BANNER */
+.hs-minion-title-banner {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 20;
+}
+
+.hs-minion-3d-wrapper:hover .hs-minion-title-banner {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-4px);
+}
+
+/* IN-GAME INSPECT BUTTON ON MINION */
+.hs-minion-inspect-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid #38bdf8;
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  cursor: pointer;
+  z-index: 15;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+
+.hs-minion-3d-wrapper:hover .hs-minion-inspect-btn {
+  opacity: 1;
+}
+
+.hs-minion-inspect-btn:hover {
+  transform: scale(1.2);
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+/* 3D MINION STAT BADGES */
+.hs-minion-stat-badge {
+  position: absolute;
+  bottom: -4px;
+  z-index: 12;
+}
+
+.hs-minion-atk { left: -4px; }
+.hs-minion-hp { right: -4px; }
+
+.minion-stat-shape {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 900;
+  font-size: 1.15rem;
+  text-shadow: 0 2px 4px #000;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.85);
+}
+
+.atk-shield-shape {
+  background: radial-gradient(circle at 35% 35%, #fbbf24 0%, #d97706 60%, #78350f 100%);
+  border: 2px solid #fef08a;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.85), 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.hp-gem-shape {
+  background: radial-gradient(circle at 35% 35%, #f87171 0%, #dc2626 60%, #7f1d1d 100%);
+  border: 2px solid #fee2e2;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.85), 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+.hp-gem-shape.is-damaged {
+  color: #fca5a5;
+  filter: contrast(1.2);
+}
+
+.stat-mini-icon {
+  font-size: 0.65rem;
+  margin-right: 1px;
+}
+
+/* STATUS HIGHLIGHTS */
+.hs-minion-3d-wrapper.is-selected {
+  transform: translateZ(25px) translateY(-10px) scale(1.15) !important;
+  filter: drop-shadow(0 0 18px #f59e0b);
+}
+
+.hs-minion-3d-wrapper.is-targetable {
+  animation: minionTargetPulse 1.2s infinite alternate;
+}
+
+@keyframes minionTargetPulse {
+  0% { filter: drop-shadow(0 0 10px #ef4444); transform: scale(1); }
+  100% { filter: drop-shadow(0 0 25px #ef4444); transform: scale(1.08); }
+}
+
+/* --- COMBAT 3D SMASH & RECOIL --- */
+.hs-minion-3d-wrapper.is-attacking-smash {
+  animation: hsMinionSmash 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  z-index: 100;
+}
+
+@keyframes hsMinionSmash {
+  0% { transform: translateZ(-20px) rotateX(-20deg) scale(0.95); }
+  45% { transform: translate3d(0, -90px, 60px) rotateX(25deg) scale(1.3); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.enemy-unit.hs-minion-3d-wrapper.is-attacking-smash {
+  animation: hsMinionSmashDown 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes hsMinionSmashDown {
+  0% { transform: translateZ(-20px) rotateX(20deg) scale(0.95); }
+  45% { transform: translate3d(0, 90px, 60px) rotateX(-25deg) scale(1.3); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.hs-minion-3d-wrapper.is-impact-recoil {
+  animation: hsMinionRecoil 0.3s ease-out;
+}
+
+@keyframes hsMinionRecoil {
+  0% { filter: brightness(2.8) contrast(1.8); transform: translate3d(-6px, 4px, 15px) rotate(-6deg); }
+  50% { filter: brightness(1.6) hue-rotate(-30deg); transform: translate3d(6px, -4px, -10px) rotate(6deg); }
+  100% { filter: brightness(1); transform: translate3d(0, 0, 0); }
+}
+
+/* 3D SHATTER DISINTEGRATION */
+.hs-minion-3d-wrapper.is-shattering {
+  animation: hsMinionShatter 0.45s ease-forward forwards;
+  pointer-events: none;
+}
+
+@keyframes hsMinionShatter {
+  0% { opacity: 1; transform: scale(1) translateZ(10px); filter: brightness(2) drop-shadow(0 0 25px #ef4444); }
+  50% { opacity: 0.8; transform: scale(1.15) rotate(10deg); filter: contrast(2) drop-shadow(0 0 40px #f59e0b); }
+  100% { opacity: 0; transform: scale(0.1) rotate(45deg); filter: blur(15px) brightness(0); }
+}
+
+/* CARD SLAM DROP ONTO BOARD */
+.hs-minion-3d-wrapper.is-slamming-down {
+  animation: hsMinionSlamDrop 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes hsMinionSlamDrop {
+  0% { opacity: 0; transform: translateY(-80px) translateZ(120px) scale(1.6); }
+  70% { opacity: 1; transform: translateY(0) translateZ(0) scale(1.05); }
+  100% { transform: translateY(0) translateZ(0) scale(1); }
+}
+
+/* SHOCKWAVE BURST RING ON BOARD */
+.hs-slam-shockwave-ring {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 4px solid #f59e0b;
+  box-shadow: 0 0 30px #f59e0b, inset 0 0 20px #f59e0b;
+  pointer-events: none;
+  animation: hsShockwaveExpand 0.7s ease-out forwards;
+  z-index: 30;
+}
+
+@keyframes hsShockwaveExpand {
+  0% { width: 10px; height: 10px; opacity: 1; }
+  100% { width: 240px; height: 240px; opacity: 0; }
+}
+
+/* --- 3D TACTILE HERO POWER COIN --- */
+.hs-hero-power-coin-btn {
+  background: radial-gradient(circle at 35% 35%, #f59e0b 0%, #b45309 60%, #78350f 100%);
+  border: 3px solid #fef08a;
+  border-radius: 50%;
+  width: 54px;
+  height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.7), inset 0 2px 4px rgba(255, 255, 255, 0.6);
+  transform-style: preserve-3d;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+.hs-hero-power-coin-btn:hover:not(.disabled) {
+  transform: translateY(-4px) scale(1.08) translateZ(15px);
+  box-shadow: 0 12px 25px rgba(245, 158, 11, 0.6), inset 0 2px 4px rgba(255, 255, 255, 0.8);
+}
+
+.hs-hero-power-coin-btn:active:not(.disabled) {
+  transform: translateY(2px) scale(0.95) translateZ(-5px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.hs-hero-power-coin-btn.disabled {
+  filter: grayscale(0.8) opacity(0.55);
+  cursor: not-allowed;
+}
+
+.hs-power-coin-icon {
+  font-size: 1.25rem;
+  color: #fff;
+  filter: drop-shadow(0 2px 4px #000);
+}
+
+.hs-power-cost-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #3b82f6;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 0.65rem;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
