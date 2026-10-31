@@ -52,12 +52,16 @@ const HearthstoneMinion3D = ({
     ? `perspective(600px) rotateX(${tilt.rotX}deg) rotateY(${tilt.rotY}deg) translateZ(18px) scale(1.08)`
     : ''
 
+  // Without `touch-action: none` the browser turns a finger drag into a page
+  // scroll and fires pointercancel, killing the drag-to-attack gesture.
+  const isDragSource = !!onPointerDown && isReady
+
   return (
     <div
       ref={minionRef}
       data-unit-id={unit.instanceId}
       data-owner={owner}
-      className={`hs-minion-3d-wrapper ${owner}-unit ${isReady ? 'is-ready' : 'is-exhausted'} ${isSelected ? 'is-selected' : ''} ${isTargetable ? 'is-targetable' : ''} ${isSpellTarget ? 'is-spell-target' : ''} ${hasTaunt ? 'has-taunt' : ''} ${isAttacking ? 'is-attacking-smash' : ''} ${isImpacted ? 'is-impact-recoil' : ''} ${isDying ? 'is-shattering' : ''} ${unit.isJustSummoned ? 'is-slamming-down' : ''}`}
+      className={`hs-minion-3d-wrapper ${owner}-unit ${isReady ? 'is-ready' : 'is-exhausted'} ${isDragSource ? 'drag-targetable' : ''} ${isSelected ? 'is-selected' : ''} ${isTargetable ? 'is-targetable' : ''} ${isSpellTarget ? 'is-spell-target' : ''} ${hasTaunt ? 'has-taunt' : ''} ${isAttacking ? 'is-attacking-smash' : ''} ${isImpacted ? 'is-impact-recoil' : ''} ${isDying ? 'is-shattering' : ''} ${unit.isJustSummoned ? 'is-slamming-down' : ''}`}
       style={{
         transform: tiltTransform || undefined
       }}

@@ -344,7 +344,10 @@ const CardGame = () => {
   // Touch drags start as "pending" and only become real drags once the finger
   // moves past a threshold, so a sideways swipe still scrolls the hand row.
   const pendingDragRef = useRef(null)
-  const suppressClickRef = useRef(false)
+  // Timestamp of the last completed drag. A click landing within the window is
+  // the browser's trailing click for that drag, not a fresh tap. A timestamp
+  // (rather than a boolean) can never stay stuck and swallow a later real tap.
+  const suppressClickRef = useRef(0)
 
   // Turn state: 'p1' | 'p2'
   const [turn, setTurn] = useState('p1')
@@ -707,7 +710,6 @@ const CardGame = () => {
           : Math.abs(dx) > 10 || Math.abs(dy) > 10
         if (moved) {
           pendingDragRef.current = null
-          suppressClickRef.current = true
           beginDrag(pending, e.clientX, e.clientY)
         }
         return
@@ -721,35 +723,68 @@ const CardGame = () => {
       }))
     }
 
+    // Hit-test the release point. Fingers and cursors land slightly off a
+    // medallion often enough to matter, so a near miss still counts as a hit.
+    const findDropTarget = (x, y) => {
+      const stack = document.elementsFromPoint
+        ? document.elementsFromPoint(x, y)
+        : [document.elementFromPoint(x, y)].filter(Boolean)
+
+      let boardEl = null
+      for (const el of stack) {
+        if (!el || !el.closest) continue
+        const unitEl = el.closest('[data-unit-id]')
+        if (unitEl) return { kind: 'unit', el: unitEl }
+        const heroEl = el.closest('[data-hero-id]')
+        if (heroEl) return { kind: 'hero', el: heroEl }
+        if (!boardEl) boardEl = el.closest('.board-cards-container')
+      }
+
+      const TOL = 18
+      let best = null
+      document.querySelectorAll('[data-unit-id], [data-hero-id]').forEach(el => {
+        const r = el.getBoundingClientRect()
+        if (r.width === 0 || r.height === 0) return
+        if (x < r.left - TOL || x > r.right + TOL || y < r.top - TOL || y > r.bottom + TOL) return
+        const dist = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2))
+        if (!best || dist < best.dist) {
+          best = { dist, el, kind: el.hasAttribute('data-unit-id') ? 'unit' : 'hero' }
+        }
+      })
+      if (best) return best
+
+      return boardEl ? { kind: 'board', el: boardEl } : null
+    }
+
     const handlePointerUp = (e) => {
+      const pending = pendingDragRef.current
       pendingDragRef.current = null
+      // Armed but never moved: leave the gesture to the element's click handler.
+      if (pending) return
       if (!dragState || !dragState.isDragging) return
 
-      const elem = document.elementFromPoint(e.clientX, e.clientY)
-      if (elem) {
-        const targetUnitElem = elem.closest('[data-unit-id]')
-        const targetHeroElem = elem.closest('[data-hero-id]')
-        const boardElem = elem.closest('.board-cards-container')
+      // The browser fires a trailing click for the gesture; swallow it so a
+      // drag never doubles as a tap on the source card or unit.
+      suppressClickRef.current = Date.now()
 
-        if (dragState.type === 'attack') {
-          if (targetUnitElem) {
-            const unitId = targetUnitElem.getAttribute('data-unit-id')
-            const owner = targetUnitElem.getAttribute('data-owner')
-            const defenderUnit = (owner === 'p1' ? p1Board : p2Board).find(u => u.instanceId === unitId)
-            if (defenderUnit && owner !== turn) {
-              handleAttackOpponentUnit(defenderUnit, owner)
-            }
-          } else if (targetHeroElem) {
-            const heroTag = targetHeroElem.getAttribute('data-hero-id')
-            if (heroTag !== turn) {
-              handleAttackOpponentHero(heroTag)
-            }
+      const target = findDropTarget(e.clientX, e.clientY)
+
+      if (target && dragState.type === 'attack') {
+        if (target.kind === 'unit') {
+          const unitId = target.el.getAttribute('data-unit-id')
+          const owner = target.el.getAttribute('data-owner')
+          const defenderUnit = (owner === 'p1' ? p1Board : p2Board).find(u => u.instanceId === unitId)
+          if (defenderUnit && owner !== turn) {
+            handleAttackOpponentUnit(defenderUnit, owner)
           }
-        } else if (dragState.type === 'play') {
-          if (boardElem || targetUnitElem || targetHeroElem) {
-            handlePlayCard(dragState.item)
+        } else if (target.kind === 'hero') {
+          const heroTag = target.el.getAttribute('data-hero-id')
+          if (heroTag !== turn) {
+            handleAttackOpponentHero(heroTag)
           }
         }
+      } else if (target && dragState.type === 'play') {
+        handlePlayCard(dragState.item)
       }
 
       setDragState(null)
@@ -777,22 +812,19 @@ const CardGame = () => {
     if (ownerPlayer !== turn || !unit.readyToAttack) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    const rect = e.currentTarget.getBoundingClientRect()
-    const startX = rect.left + rect.width / 2
-    const startY = rect.top + rect.height / 2
+    suppressClickRef.current = 0
 
-    // Selection is owned by the click/tap handler so a plain tap selects
-    // instead of being toggled straight back off.
-    setDragState({
-      isDragging: true,
+    // The drag only arms here; it begins once the pointer passes the move
+    // threshold in handlePointerMove. A plain tap therefore never draws the
+    // targeting arrow and still selects the attacker through the click handler.
+    pendingDragRef.current = {
       type: 'attack',
       item: unit,
-      startX,
-      startY,
-      currentX: e.clientX || startX,
-      currentY: e.clientY || startY
-    })
-    playSFX('draw', sfxEnabled)
+      el: e.currentTarget,
+      originX: e.clientX,
+      originY: e.clientY,
+      axis: 'any'
+    }
   }
 
   // Start Dragging a Card from Hand
@@ -803,7 +835,7 @@ const CardGame = () => {
     if (currentMana < card.cost) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
 
-    suppressClickRef.current = false
+    suppressClickRef.current = 0
 
     const rect = e.currentTarget.getBoundingClientRect()
     const startX = rect.left + rect.width / 2
@@ -1503,7 +1535,7 @@ const CardGame = () => {
       return
     }
 
-    const attacker = selectedAttacker || (dragState && dragState.type === 'attack' ? dragState.item : null)
+    const attacker = (dragState && dragState.type === 'attack' ? dragState.item : null) || selectedAttacker
     // With no attacker committed, the tap reads the enemy card instead
     if (!attacker) {
       inspectUnit(targetUnit, targetOwner)
@@ -1592,7 +1624,7 @@ const CardGame = () => {
       return
     }
 
-    const attacker = selectedAttacker || (dragState && dragState.type === 'attack' ? dragState.item : null)
+    const attacker = (dragState && dragState.type === 'attack' ? dragState.item : null) || selectedAttacker
     if (!attacker) return
 
     if (playMode === 'online_2p' && turn !== myRole) {
@@ -2260,7 +2292,10 @@ const CardGame = () => {
 
             <div 
               className={`hs-hero-frame ${selectedAttacker || (dragState && dragState.type === 'attack') ? 'targetable-hero-glow' : ''}`}
-              onClick={() => handleAttackOpponentHero(oppPlayerTag)}
+              onClick={() => {
+                if (Date.now() - suppressClickRef.current < 350) return
+                handleAttackOpponentHero(oppPlayerTag)
+              }}
               title={`Tap to attack ${oppHeroTitle}!`}
             >
               <div className="hs-hero-img-wrapper">
@@ -2321,7 +2356,10 @@ const CardGame = () => {
                         isAttacking={isAttacking}
                         isImpacted={isImpacted}
                         isDying={isDying}
-                        onClick={() => handleAttackOpponentUnit(unit, oppPlayerTag)}
+                        onClick={() => {
+                          if (Date.now() - suppressClickRef.current < 350) return
+                          handleAttackOpponentUnit(unit, oppPlayerTag)
+                        }}
                         onInspect={() => inspectUnit(unit, oppPlayerTag)}
                       />
                     </div>
@@ -2382,7 +2420,10 @@ const CardGame = () => {
                         isImpacted={isImpacted}
                         isDying={isDying}
                         onPointerDown={(e) => handleStartDragAttacker(e, unit, myPlayerTag)}
-                        onClick={() => handleSelectAttacker(unit, myPlayerTag)}
+                        onClick={() => {
+                          if (Date.now() - suppressClickRef.current < 350) return
+                          handleSelectAttacker(unit, myPlayerTag)
+                        }}
                         onInspect={() => inspectUnit(unit, myPlayerTag)}
                       />
                     </div>
@@ -2473,12 +2514,10 @@ const CardGame = () => {
                       fanIndex={idx}
                       fanTotal={myHand.length}
                       isDragging={isDraggingThis}
+                      className={canAfford ? 'draggable-hand-card' : ''}
                       onPointerDown={(e) => canAfford && handleStartDragHandCard(e, card)}
                       onClick={() => {
-                        if (suppressClickRef.current) {
-                          suppressClickRef.current = false
-                          return
-                        }
+                        if (Date.now() - suppressClickRef.current < 350) return
                         handleCardPreview(card)
                       }}
                     />
