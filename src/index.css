@@ -6592,3 +6592,384 @@ body {
   align-items: center;
   justify-content: center;
 }
+
+/* ========================================================================= */
+/* AIR HOCKEY                                                                */
+/* ========================================================================= */
+
+.air-hockey-page {
+  min-height: 100vh;
+  padding: 6rem 1.25rem 3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  background: radial-gradient(circle at 50% 0%, #16204a 0%, #070b18 60%);
+}
+
+.ah-menu {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.ah-menu-intro {
+  color: #cbd5f5;
+  text-align: center;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.ah-panel {
+  background: rgba(10, 16, 36, 0.82);
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 16px;
+  padding: 1.25rem;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.ah-panel-title {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ah-panel-title svg {
+  color: #22d3ee;
+}
+
+.ah-difficulty-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ah-diff-btn {
+  flex: 1 1 90px;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.7);
+  color: #cbd5f5;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.ah-diff-btn:hover {
+  transform: translateY(-2px);
+  border-color: #22d3ee;
+}
+
+.ah-diff-btn.active {
+  background: linear-gradient(135deg, #0891b2, #22d3ee);
+  border-color: #67e8f9;
+  color: #04121a;
+}
+
+.ah-primary-btn,
+.ah-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.1rem;
+  border-radius: 12px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.ah-primary-btn {
+  background: linear-gradient(135deg, #06b6d4, #6366f1);
+  color: #f8fbff;
+  box-shadow: 0 8px 22px rgba(6, 182, 212, 0.35);
+}
+
+.ah-primary-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(99, 102, 241, 0.45);
+}
+
+.ah-primary-btn:disabled,
+.ah-ghost-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ah-ghost-btn {
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #cbd5f5;
+}
+
+.ah-ghost-btn:hover {
+  border-color: #22d3ee;
+  color: #e0f2fe;
+}
+
+.ah-ghost-btn.danger:hover {
+  border-color: #f87171;
+  color: #fecaca;
+}
+
+.ah-join-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ah-code-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.85);
+  color: #e2e8f0;
+  font-weight: 800;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+}
+
+.ah-code-input:focus {
+  outline: none;
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18);
+}
+
+.ah-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  line-height: 1.55;
+}
+
+.ah-note.warn {
+  color: #fca5a5;
+}
+
+.ah-game {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ah-scoreboard {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: rgba(10, 16, 36, 0.8);
+  border: 1px solid rgba(94, 234, 212, 0.18);
+  border-radius: 14px;
+  padding: 0.6rem 0.9rem;
+}
+
+.ah-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 62px;
+}
+
+.ah-score-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.ah-score-value {
+  font-size: 1.9rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.ah-score.blue .ah-score-value {
+  color: #38bdf8;
+  text-shadow: 0 0 14px rgba(56, 189, 248, 0.55);
+}
+
+.ah-score.pink .ah-score-value {
+  color: #f472b6;
+  text-shadow: 0 0 14px rgba(244, 114, 182, 0.55);
+}
+
+.ah-score-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.ah-vs {
+  font-size: 0.8rem;
+  letter-spacing: 0.3em;
+  color: #64748b;
+}
+
+.ah-link-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #94a3b8;
+}
+
+.ah-link-badge.on {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #6ee7b7;
+}
+
+.ah-link-badge.off {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: #fcd34d;
+}
+
+.ah-link-badge em {
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.ah-rink-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.ah-rink {
+  display: block;
+  width: min(94vw, calc(66vh * 2 / 3), 520px);
+  aspect-ratio: 2 / 3;
+  height: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(94, 234, 212, 0.28);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6), 0 0 34px rgba(34, 211, 238, 0.12) inset;
+  background: #0a1024;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.ah-banner {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(1.6rem, 7vw, 2.6rem);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #f8fafc;
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.85), 0 4px 12px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  animation: ahBannerPop 0.45s ease-out;
+}
+
+@keyframes ahBannerPop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.ah-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(3px);
+  border-radius: 18px;
+  padding: 1rem;
+}
+
+.ah-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  text-align: center;
+  background: rgba(10, 16, 36, 0.95);
+  border: 1px solid rgba(94, 234, 212, 0.3);
+  border-radius: 16px;
+  padding: 1.4rem 1.2rem;
+  max-width: 340px;
+}
+
+.ah-overlay-card h3 {
+  margin: 0;
+  color: #e0f2fe;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  letter-spacing: 0.05em;
+}
+
+.ah-overlay-card p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.ah-final-score {
+  font-size: 2rem;
+  font-weight: 900;
+  color: #f8fafc;
+}
+
+.ah-overlay-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.ah-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.ah-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.5;
+}
+
+@media (max-width: 600px) {
+  .air-hockey-page {
+    padding: 5rem 0.75rem 2rem;
+  }
+
+  .ah-rink {
+    width: min(96vw, calc(62vh * 2 / 3));
+  }
+
+  .ah-score-value {
+    font-size: 1.5rem;
+  }
+}

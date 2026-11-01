@@ -83,6 +83,11 @@ const Header = () => {
           </NavLink>
         </li>
         <li>
+          <NavLink to="/air-hockey" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            🏒 Air Hockey
+          </NavLink>
+        </li>
+        <li>
           <NavLink to="/book" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             Book Part 1
           </NavLink>
