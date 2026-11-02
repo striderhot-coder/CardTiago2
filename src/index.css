@@ -6633,6 +6633,31 @@ body {
   gap: 0.85rem;
 }
 
+.ah-lock {
+  width: 100%;
+  max-width: 380px;
+  background: rgba(10, 16, 36, 0.82);
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.ah-lock.shake {
+  animation: ahShake 0.4s ease;
+}
+
+@keyframes ahShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
+}
+
 .ah-panel-title {
   margin: 0;
   color: #e2e8f0;

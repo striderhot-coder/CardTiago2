@@ -12,6 +12,9 @@ const FIXED_DT = 1 / 120
 const STATE_HZ = 20
 const INPUT_HZ = 30
 
+const RINK_PASSWORD = 'SHOUZO'
+const UNLOCK_KEY = 'air_hockey_unlocked'
+
 const AirHockey = () => {
   const [screen, setScreen] = useState('menu')
   const [mode, setMode] = useState('cpu')
@@ -26,6 +29,16 @@ const AirHockey = () => {
   const [sfxOn, setSfxOn] = useState(true)
   const [copied, setCopied] = useState(false)
   const [ping, setPing] = useState(null)
+  const [unlocked, setUnlocked] = useState(() => {
+    try {
+      return localStorage.getItem(UNLOCK_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const [passInput, setPassInput] = useState('')
+  const [passError, setPassError] = useState('')
+  const [shake, setShake] = useState(false)
 
   const canvasRef = useRef(null)
   const matchRef = useRef(createMatch())
@@ -505,6 +518,51 @@ const AirHockey = () => {
   const myScore = hud[mySide]
   const oppScore = hud[oppSide]
   const showWaiting = mode === 'online' && !peerConnected && onlineStatus !== 'error' && onlineStatus !== 'closed'
+
+  const handleUnlock = (e) => {
+    e.preventDefault()
+    if (passInput.trim().toUpperCase() === RINK_PASSWORD) {
+      try {
+        localStorage.setItem(UNLOCK_KEY, '1')
+      } catch {
+        /* private mode: stay unlocked for this render only */
+      }
+      setPassError('')
+      setPassInput('')
+      setUnlocked(true)
+      return
+    }
+    setPassError('Wrong password. This rink is private.')
+    setPassInput('')
+    setShake(true)
+    setTimeout(() => setShake(false), 420)
+  }
+
+  if (!unlocked) {
+    return (
+      <div className="air-hockey-page">
+        <h1 className="lg-heading">
+          Neon <span className="text-secondary">Air Hockey</span>
+        </h1>
+
+        <form className={`ah-lock ${shake ? 'shake' : ''}`} onSubmit={handleUnlock}>
+          <h3 className="ah-panel-title">🔒 Private rink</h3>
+          <p className="ah-menu-intro">Enter the password to play.</p>
+          <input
+            className="ah-code-input"
+            type="password"
+            value={passInput}
+            onChange={(e) => setPassInput(e.target.value)}
+            placeholder="Password"
+            autoComplete="off"
+            autoFocus
+          />
+          {passError && <p className="ah-note warn">{passError}</p>}
+          <button className="ah-primary-btn" type="submit">Unlock</button>
+        </form>
+      </div>
+    )
+  }
 
   return (
     <div className="air-hockey-page">
